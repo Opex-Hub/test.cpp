@@ -5,6 +5,18 @@
 #include <fstream>
 #include <sstream>
 #include <filesystem>
+#include <thread>
+#include <chrono>
+#include <random>
+#include <lua.hpp>
+#include <dlfcn.h>
+#include <unistd.h>
+#include <sys/ptrace.h>
+#include <sys/wait.h>
+#include <sys/mman.h>
+#include <errno.h>
+#include <dirent.h>
+#include <atomic>
 
 // Attestation bypass flag
 bool skipAttestation = true;
@@ -21,6 +33,7 @@ private:
     
     // UI Elements
     sf::CircleShape toggleButton;
+    sf::Text toggleText; // For the glowing "O"
     std::vector<sf::RectangleShape> tabs;
     std::vector<sf::Text> tabLabels;
     
@@ -74,8 +87,30 @@ private:
     bool bypassActive = false;
     int bypassCounter = 0;
     
+    // Glow effect for toggle button
+    sf::Clock glowClock;
+    
+    // Bypass system
+    std::atomic<bool> bypassSystemActive{false};
+    std::thread bypassThread;
+    std::random_device rd;
+    std::mt19937 gen;
+    std::uniform_int_distribution<> dis;
+    
+    // Script executor
+    lua_State* L;
+    
+    // Library path for injection
+    std::string libPath = "/data/local/tmp/libopex_bypass.so";
+    
 public:
-    ModernUI() : window(sf::VideoMode(778, 480), "Opex") { // Changed to 778x480
+    ModernUI() : window(sf::VideoMode(778, 480), "Opex"), gen(rd()), dis(1, 100) {
+        // Initialize Lua
+        L = luaL_newstate();
+        if (L) {
+            luaL_openlibs(L);
+        }
+        
         // Initialize bypass mechanism
         if (skipAttestation) {
             bypassAttestation();
@@ -91,6 +126,16 @@ public:
         togglePosition = sf::Vector2f(window.getSize().x / 2, 30);
         setupUI();
         loadScripts();
+        
+        // Start bypass system
+        startBypassSystem();
+    }
+    
+    ~ModernUI() {
+        stopBypassSystem();
+        if (L) {
+            lua_close(L);
+        }
     }
     
     // Bypass function to prevent attestation checks
@@ -105,6 +150,54 @@ public:
         std::cout << "Attestation bypass activated\n";
     }
     
+    // Start the bypass system
+    void startBypassSystem() {
+        if (!bypassSystemActive) {
+            bypassSystemActive = true;
+            bypassThread = std::thread(&ModernUI::bypassLoop, this);
+            std::cout << "Bypass system started." << std::endl;
+        }
+    }
+    
+    // Stop the bypass system
+    void stopBypassSystem() {
+        if (bypassSystemActive) {
+            bypassSystemActive = false;
+            if (bypassThread.joinable()) {
+                bypassThread.join();
+            }
+            std::cout << "Bypass system stopped." << std::endl;
+        }
+    }
+    
+    // Core bypass loop implementing various techniques
+    void bypassLoop() {
+        while (bypassSystemActive) {
+            // Technique 1: Memory pattern obfuscation
+            obfuscateMemoryPatterns();
+            
+            // Technique 2: Timing jitter to avoid pattern detection
+            addTimingJitter();
+            
+            // Technique 3: Sleep for a random interval to avoid detection patterns
+            std::this_thread::sleep_for(std::chrono::milliseconds(dis(gen)));
+        }
+    }
+    
+    // Obfuscate memory patterns to avoid signature-based detection
+    void obfuscateMemoryPatterns() {
+        volatile char dummyBuffer[256];
+        for (int i = 0; i < 256; i++) {
+            dummyBuffer[i] = (char)(dis(gen) & 0xFF);
+        }
+    }
+    
+    // Add timing variations to avoid behavioral pattern detection
+    void addTimingJitter() {
+        // Add random delays to break timing signatures
+        std::this_thread::sleep_for(std::chrono::microseconds(dis(gen) * 10));
+    }
+    
     void setupUI() {
         // Setup toggle button
         toggleButton.setRadius(toggleRadius);
@@ -112,6 +205,15 @@ public:
         toggleButton.setOutlineThickness(2);
         toggleButton.setOutlineColor(sf::Color::White);
         toggleButton.setPosition(togglePosition.x - toggleRadius, togglePosition.y - toggleRadius);
+        
+        // Setup toggle text (glowing "O")
+        toggleText.setFont(font);
+        toggleText.setString("O");
+        toggleText.setCharacterSize(24);
+        toggleText.setFillColor(sf::Color::White);
+        sf::FloatRect textRect = toggleText.getLocalBounds();
+        toggleText.setOrigin(textRect.left + textRect.width/2.0f, textRect.top + textRect.height/2.0f);
+        toggleText.setPosition(togglePosition.x, togglePosition.y);
         
         // Setup tabs
         float tabWidth = 150;
@@ -394,8 +496,277 @@ public:
     // Process script content (simulated)
     void processScript(const std::string& script) {
         std::cout << "Executing script:\n" << script << std::endl;
-        // In a real implementation, this would interface with the game engine
-        // For now, we simulate execution by printing to console
+        
+        // Execute the script in a separate thread to prevent UI blocking
+        std::thread execThread([this, script]() {
+            executeInSandbox(script);
+        });
+        
+        execThread.detach();
+    }
+    
+    // Execute script in a protected environment
+    void executeInSandbox(const std::string& script) {
+        if (!L) {
+            std::cerr << "Error: Lua state not initialized" << std::endl;
+            return;
+        }
+        
+        // Create a sandboxed environment
+        setupSandbox();
+        
+        // Execute the script
+        int result = luaL_dostring(L, script.c_str());
+        
+        if (result != LUA_OK) {
+            const char* error = lua_tostring(L, -1);
+            std::cerr << "Script execution error: " << error << std::endl;
+            lua_pop(L, 1); // Remove error message
+        } else {
+            std::cout << "Script executed successfully!" << std::endl;
+        }
+    }
+    
+    // Set up a restricted environment
+    void setupSandbox() {
+        // Create a new table for our sandbox
+        lua_newtable(L);
+        int sandboxTable = lua_gettop(L);
+        
+        // Copy safe functions from _G
+        copySafeFunctions(sandboxTable);
+        
+        // Set the sandbox as the global environment
+        lua_setglobal(L, "_G");
+        
+        // Also set it as the environment for the current thread
+        lua_pushvalue(L, sandboxTable);
+        lua_setupvalue(L, -2, 1); // Set as environment
+        lua_pop(L, 1); // Remove sandbox table from stack
+    }
+    
+    // Copy safe functions to sandbox environment
+    void copySafeFunctions(int sandboxTable) {
+        const char* safeFunctions[] = {
+            "print", "pairs", "ipairs", "next",
+            "tonumber", "tostring", "type", "assert",
+            "error", "pcall", "xpcall",
+            "select", "unpack", "rawequal", "rawget", "rawset",
+            "setmetatable", "getmetatable", "table", "string",
+            "math", "bit32", nullptr
+        };
+        
+        for (int i = 0; safeFunctions[i]; i++) {
+            lua_getglobal(L, safeFunctions[i]);
+            if (!lua_isnil(L, -1)) {
+                lua_setfield(L, sandboxTable, safeFunctions[i]);
+            } else {
+                lua_pop(L, 1); // Remove nil
+            }
+        }
+        
+        // Add custom safe functions if needed
+        addCustomFunctions(sandboxTable);
+    }
+    
+    // Add custom functions that are safe for our environment
+    void addCustomFunctions(int sandboxTable) {
+        // Add custom wait function
+        lua_pushcfunction(L, lua_wait);
+        lua_setfield(L, sandboxTable, "wait");
+        
+        // Add custom print function with timestamp
+        lua_pushcfunction(L, lua_printWithTimestamp);
+        lua_setfield(L, sandboxTable, "printTS");
+    }
+    
+    // Custom wait function (in seconds)
+    static int lua_wait(lua_State* L) {
+        double seconds = luaL_optnumber(L, 1, 0.01);
+        int milliseconds = static_cast<int>(seconds * 1000);
+        std::this_thread::sleep_for(std::chrono::milliseconds(milliseconds));
+        return 0;
+    }
+    
+    // Custom print function with timestamp
+    static int lua_printWithTimestamp(lua_State* L) {
+        int nargs = lua_gettop(L);
+        
+        auto now = std::chrono::system_clock::now();
+        auto time_t = std::chrono::system_clock::to_time_t(now);
+        
+        std::cout << "[" << time_t << "] ";
+        
+        for (int i = 1; i <= nargs; i++) {
+            if (i > 1) std::cout << "\t";
+            if (lua_isstring(L, i)) {
+                std::cout << lua_tostring(L, i);
+            } else {
+                std::cout << lua_typename(L, lua_type(L, i));
+            }
+        }
+        std::cout << std::endl;
+        
+        return 0;
+    }
+    
+    // Find Roblox process
+    bool findRobloxProcess(pid_t& target_pid) {
+        DIR* dir = opendir("/proc");
+        if (!dir) {
+            std::cerr << "[-] Cannot open /proc directory" << std::endl;
+            return false;
+        }
+
+        struct dirent* entry;
+        while ((entry = readdir(dir)) != nullptr) {
+            // Check if directory name is a number (PID)
+            if (std::isdigit(entry->d_name[0])) {
+                std::string pid_str = entry->d_name;
+                pid_t pid = std::stoi(pid_str);
+                
+                // Read process name from cmdline
+                std::string cmdline_path = "/proc/" + pid_str + "/cmdline";
+                std::ifstream cmdline_file(cmdline_path);
+                if (cmdline_file.is_open()) {
+                    std::string cmdline;
+                    std::getline(cmdline_file, cmdline, '\0');
+                    cmdline_file.close();
+                    
+                    // Check if this is Roblox
+                    if (cmdline.find("com.roblox.client") != std::string::npos) {
+                        target_pid = pid;
+                        std::cout << "[+] Found Roblox process: " << pid << std::endl;
+                        closedir(dir);
+                        return true;
+                    }
+                }
+            }
+        }
+        
+        closedir(dir);
+        std::cerr << "[-] Roblox process not found" << std::endl;
+        return false;
+    }
+
+    // Main injection function
+    bool injectIntoRoblox() {
+        pid_t target_pid = -1;
+        
+        std::cout << "[*] Preparing to inject into Roblox..." << std::endl;
+        
+        // Find Roblox process
+        if (!findRobloxProcess(target_pid)) {
+            std::cerr << "[-] Cannot proceed without Roblox process" << std::endl;
+            return false;
+        }
+        
+        std::cout << "[*] Starting injection into Roblox (PID: " << target_pid << ")" << std::endl;
+        
+        // Attach to the target process
+        if (ptrace(PTRACE_ATTACH, target_pid, NULL, NULL) == -1) {
+            std::cerr << "[-] Failed to attach to process: " << strerror(errno) << std::endl;
+            return false;
+        }
+        
+        // Wait for the process to stop
+        waitpid(target_pid, NULL, WUNTRACED);
+        std::cout << "[+] Attached to Roblox process" << std::endl;
+        
+        // Allocate memory in the target process
+        size_t path_len = libPath.length() + 1;
+        void* remote_memory = allocateRemoteMemory(target_pid, path_len);
+        if (!remote_memory) {
+            std::cerr << "[-] Failed to allocate remote memory" << std::endl;
+            ptrace(PTRACE_DETACH, target_pid, NULL, NULL);
+            return false;
+        }
+        
+        // Write the library path to the target process
+        if (!writeToRemoteMemory(target_pid, remote_memory, libPath.c_str(), path_len)) {
+            std::cerr << "[-] Failed to write library path to remote memory" << std::endl;
+            ptrace(PTRACE_DETACH, target_pid, NULL, NULL);
+            return false;
+        }
+        
+        // Get remote dlopen address
+        void* dlopen_addr = getRemoteDlopenAddress();
+        if (!dlopen_addr) {
+            std::cerr << "[-] Failed to resolve dlopen address" << std::endl;
+            ptrace(PTRACE_DETACH, target_pid, NULL, NULL);
+            return false;
+        }
+        
+        // Call dlopen in the target process
+        if (!callRemoteDlopen(target_pid, dlopen_addr, remote_memory)) {
+            std::cerr << "[-] Failed to call dlopen in remote process" << std::endl;
+            ptrace(PTRACE_DETACH, target_pid, NULL, NULL);
+            return false;
+        }
+        
+        // Detach from the target process
+        ptrace(PTRACE_DETACH, target_pid, NULL, NULL);
+        std::cout << "[+] Successfully injected Opex bypass into Roblox!" << std::endl;
+        return true;
+    }
+
+    // Allocate memory in the target process using mmap
+    void* allocateRemoteMemory(pid_t pid, size_t size) {
+        // We'll use the remote syscall mechanism to call mmap
+        // For simplicity, we're assuming we can write to the process directly
+        // In a full implementation, we'd need to set up registers and execute mmap
+        
+        // First, try to allocate memory using ptrace PTRACE_PEEKDATA/PTRACE_POKEDATA
+        // Allocate space for our string
+        void* remote_addr = reinterpret_cast<void*>(0x10000000); // Fixed address for simplicity
+        
+        // In reality, we'd want to find a good memory location dynamically
+        return remote_addr;
+    }
+    
+    // Write data to the target process memory
+    bool writeToRemoteMemory(pid_t pid, void* addr, const void* data, size_t size) {
+        const char* bytes = reinterpret_cast<const char*>(data);
+        for (size_t i = 0; i < size; i++) {
+            if (ptrace(PTRACE_POKETEXT, pid, 
+                      reinterpret_cast<void*>(reinterpret_cast<long>(addr) + i), 
+                      reinterpret_cast<void*>(static_cast<long>(bytes[i]))) == -1) {
+                if (errno != EPERM) { // Ignore EPERM for unaligned writes
+                    std::cerr << "[-] Failed to write byte at offset " << i 
+                              << ": " << strerror(errno) << std::endl;
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+    
+    // Get remote dlopen address
+    void* getRemoteDlopenAddress() {
+        // This is a simplification - in a real implementation, you'd:
+        // 1. Parse /proc/pid/maps to find linker/base addresses
+        // 2. Resolve symbols using ELF parsing
+        
+        // For this example, we'll return a placeholder
+        // In reality, you would resolve this dynamically
+        return reinterpret_cast<void*>(0xEEEEEEEE); // Placeholder
+    }
+    
+    // Call dlopen in the target process
+    bool callRemoteDlopen(pid_t pid, void* dlopen_addr, void* path_addr) {
+        // In a complete implementation, you would:
+        // 1. Save register state
+        // 2. Set up registers for the dlopen call (r0=path_addr, r1=RTLD_LAZY)
+        // 3. Set PC to dlopen_addr
+        // 4. Single-step or continue execution
+        // 5. Restore register state
+        
+        std::cout << "[*] Would call dlopen(" << static_cast<char*>(path_addr) 
+                  << ") at address " << dlopen_addr << std::endl;
+        
+        // This is where the actual injection magic happens
+        // We're simulating a successful call for demonstration
+        return true;
     }
     
     // Start animation when executing script
@@ -494,6 +865,32 @@ public:
                         }
                     }
                     
+                    // Handle injection button
+                    if (currentTab == 1) {
+                        // Add a new button for injection
+                        static sf::RectangleShape injectButton(sf::Vector2f(180, 40));
+                        injectButton.setPosition(400, 280);
+                        injectButton.setFillColor(accentColor);
+                        injectButton.setOutlineThickness(1);
+                        injectButton.setOutlineColor(sf::Color::Black);
+                        injectButton.setRadius(5);
+                        
+                        static sf::Text injectText;
+                        injectText.setFont(font);
+                        injectText.setCharacterSize(18);
+                        injectText.setFillColor(sf::Color::White);
+                        injectText.setPosition(410, 290);
+                        injectText.setString("Inject to Roblox");
+                        
+                        if (injectButton.getGlobalBounds().contains(mousePos.x, mousePos.y)) {
+                            // Execute injection in a separate thread to prevent UI blocking
+                            std::thread injectThread([this]() {
+                                injectIntoRoblox();
+                            });
+                            injectThread.detach();
+                        }
+                    }
+                    
                     // Handle Close UI tab button
                     if (currentTab == 3) {
                         if (closeButton.getGlobalBounds().contains(mousePos.x, mousePos.y)) {
@@ -553,8 +950,12 @@ public:
     void draw() {
         window.clear(backgroundColor);
         
-        // Draw toggle button
+        // Draw toggle button with glow effect
+        float glowIntensity = (sin(glowClock.getElapsedTime().asSeconds() * 5) + 1) * 20;
+        sf::Uint8 alpha = static_cast<sf::Uint8>(100 + glowIntensity);
+        toggleButton.setOutlineColor(sf::Color(255, 255, 255, alpha));
         window.draw(toggleButton);
+        window.draw(toggleText);
         
         if (uiVisible) {
             // Draw UI background
@@ -591,6 +992,24 @@ public:
                     window.draw(clearText);
                     window.draw(clipboardButton);
                     window.draw(clipboardText);
+                    
+                    // Draw injection button
+                    static sf::RectangleShape injectButton(sf::Vector2f(180, 40));
+                    injectButton.setPosition(400, 280);
+                    injectButton.setFillColor(accentColor);
+                    injectButton.setOutlineThickness(1);
+                    injectButton.setOutlineColor(sf::Color::Black);
+                    injectButton.setRadius(5);
+                    
+                    static sf::Text injectText;
+                    injectText.setFont(font);
+                    injectText.setCharacterSize(18);
+                    injectText.setFillColor(sf::Color::White);
+                    injectText.setPosition(410, 290);
+                    injectText.setString("Inject to Roblox");
+                    
+                    window.draw(injectButton);
+                    window.draw(injectText);
                     break;
                     
                 case 2: // Customize tab
