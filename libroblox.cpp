@@ -1,298 +1,254 @@
 #include <jni.h>
 #include <android/log.h>
-#include <pthread.h>
-#include <unistd.h>
 #include <cstdint>
-#include <cstring>
 #include <memory>
+#include <algorithm>
 
-// Logging macros
-#define LOG_TAG "libroblox"
+// Enable NEON vectorization for ARM64
+#ifdef __ARM_NEON
+#include <arm_neon.h>
+#endif
+
+#define LOG_TAG "ImageProcessor"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
-#define LOGW(...) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
 
-// Forward declarations
-namespace Luau {
-    class VM;
-    class Scheduler;
+// ============= Image Processing Functions =============
+
+// Convert RGBA to grayscale using NEON optimization
+void rgbaToGrayscaleNeon(const uint8_t* input, uint8_t* output, int pixelCount) {
+#ifdef __ARM_NEON
+    const int simdSize = 16; // Process 16 pixels at once
+    const int pixelBatch = 4; // 4 channels per pixel
+
+    // Coefficients for grayscale conversion (0.299R + 0.587G + 0.114B)
+    // Using fixed point arithmetic for performance
+    uint8x16x4_t coeffs = {{
+        vdupq_n_u8(77),   // 0.299 * 256 ≈ 77
+        vdupq_n_u8(150),  // 0.587 * 256 ≈ 150
+        vdupq_n_u8(29),   // 0.114 * 256 ≈ 29
+        vdupq_n_u8(0)
+    }};
+
+    int simdPixels = pixelCount / simdSize;
+    int remainingPixels = pixelCount % simdSize;
+
+    for (int i = 0; i < simdPixels; ++i) {
+        // Load 16 RGBA pixels (64 bytes)
+        uint8x16x4_t rgba = vld4q_u8(input);
+        input += 64;
+
+        // Convert to grayscale using weighted sum
+        uint16x8_t lowSum = vmull_u8(vget_low_u8(rgba.val[0]), vget_low_u8(coeffs.val[0]));
+        lowSum = vmlal_u8(lowSum, vget_low_u8(rgba.val[1]), vget_low_u8(coeffs.val[1]));
+        lowSum = vmlal_u8(lowSum, vget_low_u8(rgba.val[2]), vget_low_u8(coeffs.val[2]));
+
+        uint16x8_t highSum = vmull_u8(vget_high_u8(rgba.val[0]), vget_high_u8(coeffs.val[0]));
+        highSum = vmlal_u8(highSum, vget_high_u8(rgba.val[1]), vget_high_u8(coeffs.val[1]));
+        highSum = vmlal_u8(highSum, vget_high_u8(rgba.val[2]), vget_high_u8(coeffs.val[2]));
+
+        // Divide by 256 (right shift by 8) and narrow to 8-bit
+        uint8x8_t grayLow = vshrn_n_u16(lowSum, 8);
+        uint8x8_t grayHigh = vshrn_n_u16(highSum, 8);
+
+        // Store result
+        vst1q_u8(output, vcombine_u8(grayLow, grayHigh));
+        output += 16;
+    }
+
+    // Process remaining pixels
+    for (int i = 0; i < remainingPixels; ++i) {
+        int r = input[0];
+        int g = input[1];
+        int b = input[2];
+        *output = (77 * r + 150 * g + 29 * b) >> 8;
+        input += 4;
+        output++;
+    }
+#else
+    // Fallback for non-NEON platforms
+    for (int i = 0; i < pixelCount; ++i) {
+        int r = input[0];
+        int g = input[1];
+        int b = input[2];
+        *output = (77 * r + 150 * g + 29 * b) >> 8;
+        input += 4;
+        output++;
+    }
+#endif
 }
 
-// Memory manager
-class MemoryManager {
-private:
-    static MemoryManager* instance;
-    size_t totalMemory;
-    size_t usedMemory;
-    pthread_mutex_t memoryMutex;
+// Scale image using bilinear interpolation
+void scaleImageBilinear(const uint8_t* input, uint8_t* output, 
+                        int srcWidth, int srcHeight, int dstWidth, int dstHeight) {
+    float xRatio = (float)(srcWidth - 1) / dstWidth;
+    float yRatio = (float)(srcHeight - 1) / dstHeight;
 
-public:
-    static MemoryManager* getInstance() {
-        if (instance == nullptr) {
-            instance = new MemoryManager();
-        }
-        return instance;
-    }
-
-    MemoryManager() : totalMemory(0), usedMemory(0) {
-        pthread_mutex_init(&memoryMutex, nullptr);
-    }
-
-    ~MemoryManager() {
-        pthread_mutex_destroy(&memoryMutex);
-    }
-
-    void* allocate(size_t size) {
-        pthread_mutex_lock(&memoryMutex);
-        void* ptr = malloc(size);
-        if (ptr) {
-            usedMemory += size;
-        }
-        pthread_mutex_unlock(&memoryMutex);
-        return ptr;
-    }
-
-    void deallocate(void* ptr, size_t size) {
-        pthread_mutex_lock(&memoryMutex);
-        free(ptr);
-        usedMemory -= size;
-        pthread_mutex_unlock(&memoryMutex);
-    }
-
-    size_t getUsedMemory() {
-        pthread_mutex_lock(&memoryMutex);
-        size_t mem = usedMemory;
-        pthread_mutex_unlock(&memoryMutex);
-        return mem;
-    }
-};
-
-MemoryManager* MemoryManager::instance = nullptr;
-
-// Luau VM wrapper
-class LuauVM {
-private:
-    Luau::VM* vm;
-    Luau::Scheduler* scheduler;
-    bool initialized;
-
-public:
-    LuauVM() : vm(nullptr), scheduler(nullptr), initialized(false) {}
-    
-    bool initialize() {
-        // Initialize Luau VM
-        // In a real implementation, this would create the VM and scheduler
-        LOGI("Initializing Luau VM");
-        initialized = true;
-        return true;
-    }
-    
-    void executeScript(const char* script) {
-        if (!initialized) {
-            LOGE("Luau VM not initialized");
-            return;
-        }
-        
-        // Execute script in VM
-        LOGI("Executing script: %s", script);
-        // Real implementation would parse and execute the script
-    }
-    
-    void update(float deltaTime) {
-        if (!initialized) return;
-        
-        // Update VM scheduler
-        // Real implementation would run pending tasks
-    }
-    
-    void shutdown() {
-        LOGI("Shutting down Luau VM");
-        initialized = false;
-    }
-};
-
-// Game engine core
-class RobloxEngine {
-private:
-    static RobloxEngine* instance;
-    LuauVM luauVM;
-    MemoryManager* memoryManager;
-    bool running;
-    pthread_t gameThread;
-    
-public:
-    static RobloxEngine* getInstance() {
-        if (instance == nullptr) {
-            instance = new RobloxEngine();
-        }
-        return instance;
-    }
-    
-    RobloxEngine() : memoryManager(MemoryManager::getInstance()), running(false) {}
-    
-    bool initialize() {
-        LOGI("Initializing Roblox Engine");
-        
-        // Initialize memory manager
-        if (!memoryManager) {
-            LOGE("Failed to initialize memory manager");
-            return false;
-        }
-        
-        // Initialize Luau VM
-        if (!luauVM.initialize()) {
-            LOGE("Failed to initialize Luau VM");
-            return false;
-        }
-        
-        LOGI("Roblox Engine initialized successfully");
-        return true;
-    }
-    
-    void startGameLoop() {
-        if (running) {
-            LOGW("Game loop already running");
-            return;
-        }
-        
-        running = true;
-        int result = pthread_create(&gameThread, nullptr, gameLoopThread, this);
-        if (result != 0) {
-            LOGE("Failed to create game thread: %d", result);
-            running = false;
-        } else {
-            LOGI("Game loop started");
-        }
-    }
-    
-    void stopGameLoop() {
-        if (!running) {
-            LOGW("Game loop not running");
-            return;
-        }
-        
-        running = false;
-        pthread_join(gameThread, nullptr);
-        LOGI("Game loop stopped");
-    }
-    
-    void loadScript(const char* script) {
-        luauVM.executeScript(script);
-    }
-    
-    void updateEngine(float deltaTime) {
-        // Update all engine systems
-        luauVM.update(deltaTime);
-    }
-    
-    void shutdown() {
-        LOGI("Shutting down Roblox Engine");
-        stopGameLoop();
-        luauVM.shutdown();
-    }
-
-private:
-    static void* gameLoopThread(void* arg) {
-        RobloxEngine* engine = static_cast<RobloxEngine*>(arg);
-        return engine->gameLoop();
-    }
-    
-    void* gameLoop() {
-        LOGI("Entering game loop");
-        const int TARGET_FPS = 60;
-        const long FRAME_TIME_NANOS = 1000000000L / TARGET_FPS;
-        
-        struct timespec start, end;
-        long frameTime;
-        
-        while (running) {
-            clock_gettime(CLOCK_MONOTONIC, &start);
+    for (int y = 0; y < dstHeight; y++) {
+        for (int x = 0; x < dstWidth; x++) {
+            float px = xRatio * x;
+            float py = yRatio * y;
             
-            // Update engine (typically at 60 FPS)
-            updateEngine(1.0f / TARGET_FPS);
+            int x1 = (int)px;
+            int y1 = (int)py;
+            int x2 = (x1 + 1) < srcWidth ? x1 + 1 : x1;
+            int y2 = (y1 + 1) < srcHeight ? y1 + 1 : y1;
             
-            // Render frame
-            renderFrame();
-            
-            // Maintain frame rate
-            clock_gettime(CLOCK_MONOTONIC, &end);
-            frameTime = (end.tv_sec - start.tv_sec) * 1000000000L + 
-                        (end.tv_nsec - start.tv_nsec);
-            
-            if (frameTime < FRAME_TIME_NANOS) {
-                long sleepTime = (FRAME_TIME_NANOS - frameTime) / 1000000L;
-                if (sleepTime > 0) {
-                    usleep(sleepTime * 1000);
-                }
+            float fx = px - x1;
+            float fy = py - y1;
+            float fx1 = 1.0f - fx;
+            float fy1 = 1.0f - fy;
+
+            int index1 = (y1 * srcWidth + x1) * 4;
+            int index2 = (y1 * srcWidth + x2) * 4;
+            int index3 = (y2 * srcWidth + x1) * 4;
+            int index4 = (y2 * srcWidth + x2) * 4;
+            int dstIndex = (y * dstWidth + x) * 4;
+
+            for (int c = 0; c < 4; c++) {
+                float p1 = input[index1 + c] * fx1 + input[index2 + c] * fx;
+                float p2 = input[index3 + c] * fx1 + input[index4 + c] * fx;
+                output[dstIndex + c] = (uint8_t)(p1 * fy1 + p2 * fy);
             }
         }
-        
-        LOGI("Exiting game loop");
-        return nullptr;
     }
+}
+
+// Apply simple box blur filter
+void applyBoxBlur(uint8_t* imageData, int width, int height, int radius) {
+    int windowSize = 2 * radius + 1;
+    int windowArea = windowSize * windowSize;
     
-    void renderFrame() {
-        // In a real implementation, this would render the current frame
-        // For this example, we just log occasionally to show activity
-        static int frameCount = 0;
-        if (++frameCount % 60 == 0) {
-            LOGI("Rendered %d frames", frameCount);
+    // Temporary buffer for processing
+    std::unique_ptr<uint8_t[]> tempBuffer(new uint8_t[width * height * 4]);
+    
+    // Horizontal pass
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            int r = 0, g = 0, b = 0, a = 0;
+            
+            for (int dx = -radius; dx <= radius; dx++) {
+                int nx = std::max(0, std::min(width - 1, x + dx));
+                int idx = (y * width + nx) * 4;
+                r += imageData[idx];
+                g += imageData[idx + 1];
+                b += imageData[idx + 2];
+                a += imageData[idx + 3];
+            }
+            
+            int outIdx = (y * width + x) * 4;
+            tempBuffer[outIdx] = r / windowSize;
+            tempBuffer[outIdx + 1] = g / windowSize;
+            tempBuffer[outIdx + 2] = b / windowSize;
+            tempBuffer[outIdx + 3] = a / windowSize;
         }
     }
-};
-
-RobloxEngine* RobloxEngine::instance = nullptr;
-
-// JNI Functions
-extern "C" {
-
-JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
-    LOGI("libroblox.so loaded");
-    return JNI_VERSION_1_6;
-}
-
-JNIEXPORT void JNICALL JNI_OnUnload(JavaVM* vm, void* reserved) {
-    LOGI("libroblox.so unloaded");
-    RobloxEngine::getInstance()->shutdown();
-}
-
-JNIEXPORT jboolean JNICALL
-Java_com_roblox_client_RobloxNative_initializeEngine(JNIEnv* env, jobject thiz) {
-    LOGI("Initializing Roblox Engine from Java");
-    return RobloxEngine::getInstance()->initialize() ? JNI_TRUE : JNI_FALSE;
-}
-
-JNIEXPORT void JNICALL
-Java_com_roblox_client_RobloxNative_startGameLoop(JNIEnv* env, jobject thiz) {
-    LOGI("Starting game loop from Java");
-    RobloxEngine::getInstance()->startGameLoop();
-}
-
-JNIEXPORT void JNICALL
-Java_com_roblox_client_RobloxNative_stopGameLoop(JNIEnv* env, jobject thiz) {
-    LOGI("Stopping game loop from Java");
-    RobloxEngine::getInstance()->stopGameLoop();
-}
-
-JNIEXPORT void JNICALL
-Java_com_roblox_client_RobloxNative_loadScript(JNIEnv* env, jobject thiz, jstring script) {
-    if (script == nullptr) return;
     
-    const char* scriptStr = env->GetStringUTFChars(script, nullptr);
-    LOGI("Loading script from Java: %s", scriptStr);
-    RobloxEngine::getInstance()->loadScript(scriptStr);
-    env->ReleaseStringUTFChars(script, scriptStr);
+    // Vertical pass
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            int r = 0, g = 0, b = 0, a = 0;
+            
+            for (int dy = -radius; dy <= radius; dy++) {
+                int ny = std::max(0, std::min(height - 1, y + dy));
+                int idx = (ny * width + x) * 4;
+                r += tempBuffer[idx];
+                g += tempBuffer[idx + 1];
+                b += tempBuffer[idx + 2];
+                a += tempBuffer[idx + 3];
+            }
+            
+            int outIdx = (y * width + x) * 4;
+            imageData[outIdx] = r / windowSize;
+            imageData[outIdx + 1] = g / windowSize;
+            imageData[outIdx + 2] = b / windowSize;
+            imageData[outIdx + 3] = a / windowSize;
+        }
+    }
 }
 
-JNIEXPORT jlong JNICALL
-Java_com_roblox_client_RobloxNative_getUsedMemory(JNIEnv* env, jobject thiz) {
-    return static_cast<jlong>(MemoryManager::getInstance()->getUsedMemory());
+// JNI function to convert RGBA to grayscale
+extern "C" JNIEXPORT jbyteArray JNICALL
+Java_com_roblox_client_ImageProcessor_convertRgbaToGrayscale(
+        JNIEnv *env,
+        jobject /* this */,
+        jbyteArray rgbaData,
+        jint width,
+        jint height) {
+    
+    jsize dataSize = env->GetArrayLength(rgbaData);
+    jbyte* inputData = env->GetByteArrayElements(rgbaData, nullptr);
+    
+    // Allocate output array (1 byte per pixel for grayscale)
+    jbyteArray grayData = env->NewByteArray(width * height);
+    jbyte* outputData = env->GetByteArrayElements(grayData, nullptr);
+    
+    // Process image
+    rgbaToGrayscaleNeon(reinterpret_cast<const uint8_t*>(inputData),
+                       reinterpret_cast<uint8_t*>(outputData),
+                       width * height);
+    
+    // Release arrays
+    env->ReleaseByteArrayElements(rgbaData, inputData, JNI_ABORT);
+    env->ReleaseByteArrayElements(grayData, outputData, 0);
+    
+    return grayData;
 }
 
-JNIEXPORT void JNICALL
-Java_com_roblox_client_RobloxNative_shutdownEngine(JNIEnv* env, jobject thiz) {
-    LOGI("Shutting down Roblox Engine from Java");
-    RobloxEngine::getInstance()->shutdown();
+// JNI function to scale image
+extern "C" JNIEXPORT jbyteArray JNICALL
+Java_com_roblox_client_ImageProcessor_scaleImage(
+        JNIEnv *env,
+        jobject /* this */,
+        jbyteArray inputData,
+        jint srcWidth,
+        jint srcHeight,
+        jint dstWidth,
+        jint dstHeight) {
+    
+    jsize dataSize = env->GetArrayLength(inputData);
+    jbyte* inputBytes = env->GetByteArrayElements(inputData, nullptr);
+    
+    // Allocate output array (RGBA format)
+    jbyteArray outputData = env->NewByteArray(dstWidth * dstHeight * 4);
+    jbyte* outputBytes = env->GetByteArrayElements(outputData, nullptr);
+    
+    // Process image
+    scaleImageBilinear(reinterpret_cast<const uint8_t*>(inputBytes),
+                      reinterpret_cast<uint8_t*>(outputBytes),
+                      srcWidth, srcHeight, dstWidth, dstHeight);
+    
+    // Release arrays
+    env->ReleaseByteArrayElements(inputData, inputBytes, JNI_ABORT);
+    env->ReleaseByteArrayElements(outputData, outputBytes, 0);
+    
+    return outputData;
 }
 
-} // extern "C"
+// JNI function to apply box blur
+extern "C" JNIEXPORT jbyteArray JNICALL
+Java_com_roblox_client_ImageProcessor_applyBoxBlur(
+        JNIEnv *env,
+        jobject /* this */,
+        jbyteArray inputData,
+        jint width,
+        jint height,
+        jint radius) {
+    
+    jsize dataSize = env->GetArrayLength(inputData);
+    jbyte* inputBytes = env->GetByteArrayElements(inputData, nullptr);
+    
+    // Create output array (copy input data)
+    jbyteArray outputData = env->NewByteArray(dataSize);
+    env->SetByteArrayRegion(outputData, 0, dataSize, inputBytes);
+    jbyte* outputBytes = env->GetByteArrayElements(outputData, nullptr);
+    
+    // Process image
+    applyBoxBlur(reinterpret_cast<uint8_t*>(outputBytes), width, height, radius);
+    
+    // Release arrays
+    env->ReleaseByteArrayElements(inputData, inputBytes, JNI_ABORT);
+    env->ReleaseByteArrayElements(outputData, outputBytes, 0);
+    
+    return outputData;
+}
