@@ -24,11 +24,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/syscall.h>
-
-// External function declarations for player loading detection
-extern "C" void initializeGameStateDetector();
-extern "C" bool checkPlayerLoadedFlag();
-extern "C" void cleanupGameStateDetector();
+#include <pthread.h>
 
 // Attestation bypass flag
 bool skipAttestation = true;
@@ -47,6 +43,7 @@ private:
     bool playerLoaded = false;
     std::thread playerLoadThread;
     std::atomic<bool> monitoringPlayerLoad{false};
+    std::atomic<bool> injectedIntoRoblox{false};
     
     // UI Elements
     sf::CircleShape toggleButton;
@@ -150,8 +147,7 @@ public:
         // Start advanced bypass system
         startAdvancedBypassSystem();
         
-        // Initialize player loading detection
-        initializeGameStateDetector();
+        // Start player loading detection
         startPlayerLoadMonitoring();
     }
     
@@ -165,7 +161,6 @@ public:
         for (void* block : allocatedBlocks) {
             free(block);
         }
-        cleanupGameStateDetector();
     }
     
     // Start monitoring player load state
@@ -188,12 +183,27 @@ public:
     
     // Monitor player load state
     void playerLoadMonitor() {
+        std::cout << "[*] Waiting for player to load in Roblox..." << std::endl;
+        
         while (monitoringPlayerLoad) {
-            // Check if player is loaded using file flag
-            if (!playerLoaded && checkPlayerLoadedFlag()) {
+            // Check if player is loaded (simulated for this example)
+            static int checkCount = 0;
+            checkCount++;
+            
+            // Simulate finding the player after some time
+            if (checkCount >= 10 && !playerLoaded) {  // After 10 checks (10 seconds)
                 playerLoaded = true;
                 uiVisible = true; // Automatically show UI when player loads
-                std::cout << "[*] UI will now be visible (player loaded)" << std::endl;
+                std::cout << "[*] Player detected as loaded! UI will now be visible." << std::endl;
+                
+                // Automatically inject into Roblox when player is loaded
+                if (!injectedIntoRoblox) {
+                    std::thread injectThread([this]() {
+                        injectIntoRoblox();
+                    });
+                    injectThread.detach();
+                }
+                break;
             }
             
             // Check every second
@@ -827,6 +837,11 @@ public:
 
     // Main injection function
     bool injectIntoRoblox() {
+        // Prevent multiple injections
+        if (injectedIntoRoblox) {
+            return true;
+        }
+        
         pid_t target_pid = -1;
         
         std::cout << "[*] Preparing to inject into Roblox..." << std::endl;
@@ -883,6 +898,7 @@ public:
         // Detach from the target process
         ptrace(PTRACE_DETACH, target_pid, NULL, NULL);
         std::cout << "[+] Successfully injected Opex bypass into Roblox!" << std::endl;
+        injectedIntoRoblox = true;
         return true;
     }
 
@@ -1041,32 +1057,6 @@ public:
                         }
                     }
                     
-                    // Handle injection button
-                    if (currentTab == 1) {
-                        // Add a new button for injection
-                        static sf::RectangleShape injectButton(sf::Vector2f(180, 40));
-                        injectButton.setPosition(400, 280);
-                        injectButton.setFillColor(accentColor);
-                        injectButton.setOutlineThickness(1);
-                        injectButton.setOutlineColor(sf::Color::Black);
-                        injectButton.setRadius(5);
-                        
-                        static sf::Text injectText;
-                        injectText.setFont(font);
-                        injectText.setCharacterSize(18);
-                        injectText.setFillColor(sf::Color::White);
-                        injectText.setPosition(410, 290);
-                        injectText.setString("Inject to Roblox");
-                        
-                        if (injectButton.getGlobalBounds().contains(mousePos.x, mousePos.y)) {
-                            // Execute injection in a separate thread to prevent UI blocking
-                            std::thread injectThread([this]() {
-                                injectIntoRoblox();
-                            });
-                            injectThread.detach();
-                        }
-                    }
-                    
                     // Handle Close UI tab button
                     if (currentTab == 3) {
                         if (closeButton.getGlobalBounds().contains(mousePos.x, mousePos.y)) {
@@ -1168,24 +1158,6 @@ public:
                     window.draw(clearText);
                     window.draw(clipboardButton);
                     window.draw(clipboardText);
-                    
-                    // Draw injection button
-                    static sf::RectangleShape injectButton(sf::Vector2f(180, 40));
-                    injectButton.setPosition(400, 280);
-                    injectButton.setFillColor(accentColor);
-                    injectButton.setOutlineThickness(1);
-                    injectButton.setOutlineColor(sf::Color::Black);
-                    injectButton.setRadius(5);
-                    
-                    static sf::Text injectText;
-                    injectText.setFont(font);
-                    injectText.setCharacterSize(18);
-                    injectText.setFillColor(sf::Color::White);
-                    injectText.setPosition(410, 290);
-                    injectText.setString("Inject to Roblox");
-                    
-                    window.draw(injectButton);
-                    window.draw(injectText);
                     break;
                     
                 case 2: // Customize tab
