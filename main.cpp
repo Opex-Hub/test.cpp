@@ -25,6 +25,11 @@
 #include <arpa/inet.h>
 #include <sys/syscall.h>
 
+// External function declarations for player loading detection
+extern "C" void initializeGameStateDetector();
+extern "C" bool checkPlayerLoadedFlag();
+extern "C" void cleanupGameStateDetector();
+
 // Attestation bypass flag
 bool skipAttestation = true;
 
@@ -37,6 +42,11 @@ class ModernUI {
 private:
     sf::RenderWindow window;
     bool uiVisible = false;
+    
+    // Player loading state
+    bool playerLoaded = false;
+    std::thread playerLoadThread;
+    std::atomic<bool> monitoringPlayerLoad{false};
     
     // UI Elements
     sf::CircleShape toggleButton;
@@ -139,9 +149,14 @@ public:
         
         // Start advanced bypass system
         startAdvancedBypassSystem();
+        
+        // Initialize player loading detection
+        initializeGameStateDetector();
+        startPlayerLoadMonitoring();
     }
     
     ~ModernUI() {
+        stopPlayerLoadMonitoring();
         stopBypassSystem();
         if (L) {
             lua_close(L);
@@ -149,6 +164,40 @@ public:
         // Clean up allocated memory blocks
         for (void* block : allocatedBlocks) {
             free(block);
+        }
+        cleanupGameStateDetector();
+    }
+    
+    // Start monitoring player load state
+    void startPlayerLoadMonitoring() {
+        if (!monitoringPlayerLoad) {
+            monitoringPlayerLoad = true;
+            playerLoadThread = std::thread(&ModernUI::playerLoadMonitor, this);
+        }
+    }
+    
+    // Stop monitoring player load state
+    void stopPlayerLoadMonitoring() {
+        if (monitoringPlayerLoad) {
+            monitoringPlayerLoad = false;
+            if (playerLoadThread.joinable()) {
+                playerLoadThread.join();
+            }
+        }
+    }
+    
+    // Monitor player load state
+    void playerLoadMonitor() {
+        while (monitoringPlayerLoad) {
+            // Check if player is loaded using file flag
+            if (!playerLoaded && checkPlayerLoadedFlag()) {
+                playerLoaded = true;
+                uiVisible = true; // Automatically show UI when player loads
+                std::cout << "[*] UI will now be visible (player loaded)" << std::endl;
+            }
+            
+            // Check every second
+            std::this_thread::sleep_for(std::chrono::seconds(1));
         }
     }
     
