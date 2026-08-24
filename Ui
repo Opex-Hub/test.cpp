@@ -1,259 +1,327 @@
---[[
-    Visual Mockup: Executor UI for Roblox Studio
-    - Dark blue theme
-    - Title: "Executor"
-    - Label: "Op"
-    - Draggable toggle button with letter "O"
-    - Non‑functional (no actual script execution)
-]]
-
+-- Roblox Dark Blue Executor UI Script
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
 
-local player = Players.LocalPlayer
-local playerGui = player:WaitForChild("PlayerGui")
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
--- Create ScreenGui
-local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "ExecutorUI"
-screenGui.ResetOnSpawn = false
-screenGui.IgnoreGuiInset = true
-screenGui.Parent = playerGui
+-- Main ScreenGui
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "OExecutorGui"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = PlayerGui
 
--- Main Frame
-local mainFrame = Instance.new("Frame")
-mainFrame.Name = "MainFrame"
-mainFrame.Size = UDim2.new(0, 420, 0, 300)
-mainFrame.Position = UDim2.new(0.5, -210, 0.5, -150)
-mainFrame.BackgroundColor3 = Color3.fromRGB(12, 18, 40) -- deep dark blue
-mainFrame.BorderSizePixel = 0
-mainFrame.Active = true
-mainFrame.Draggable = false -- we'll handle dragging manually for a smoother feel
-mainFrame.Parent = screenGui
+-- Helper Function for Dragging
+local function enableDragging(frame, dragHandle)
+    dragHandle = dragHandle or frame
+    local dragging, dragInput, dragStart, startPos
 
--- Rounded corners and subtle border
-local corner = Instance.new("UICorner")
-corner.CornerRadius = UDim.new(0, 10)
-corner.Parent = mainFrame
+    dragHandle.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = frame.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
 
-local stroke = Instance.new("UIStroke")
-stroke.Color = Color3.fromRGB(40, 60, 120)
-stroke.Thickness = 1.5
-stroke.Transparency = 0.5
-stroke.Parent = mainFrame
+    dragHandle.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+            dragInput = input
+        end
+    end)
 
--- Header bar (title area)
-local header = Instance.new("Frame")
-header.Name = "Header"
-header.Size = UDim2.new(1, 0, 0, 40)
-header.Position = UDim2.new(0, 0, 0, 0)
-header.BackgroundColor3 = Color3.fromRGB(20, 28, 55)
-header.BorderSizePixel = 0
-header.Parent = mainFrame
-
-local headerCorner = Instance.new("UICorner")
-headerCorner.CornerRadius = UDim.new(0, 10)
-headerCorner.Parent = header
-
--- Title text
-local titleLabel = Instance.new("TextLabel")
-titleLabel.Name = "Title"
-titleLabel.Size = UDim2.new(0, 200, 1, 0)
-titleLabel.Position = UDim2.new(0, 12, 0, 0)
-titleLabel.BackgroundTransparency = 1
-titleLabel.Text = "Executor"
-titleLabel.TextColor3 = Color3.fromRGB(200, 215, 255)
-titleLabel.Font = Enum.Font.SourceSansBold
-titleLabel.TextSize = 20
-titleLabel.TextXAlignment = Enum.TextXAlignment.Left
-titleLabel.Parent = header
-
--- "Op" label (subtle badge)
-local opLabel = Instance.new("TextLabel")
-opLabel.Name = "OpLabel"
-opLabel.Size = UDim2.new(0, 50, 0, 22)
-opLabel.Position = UDim2.new(1, -60, 0.5, -11)
-opLabel.BackgroundColor3 = Color3.fromRGB(30, 60, 140)
-opLabel.BackgroundTransparency = 0.2
-opLabel.Text = "Op"
-opLabel.TextColor3 = Color3.fromRGB(180, 200, 255)
-opLabel.Font = Enum.Font.SourceSansBold
-opLabel.TextSize = 14
-opLabel.Parent = header
-
-local opCorner = Instance.new("UICorner")
-opCorner.CornerRadius = UDim.new(0, 6)
-opCorner.Parent = opLabel
-
--- Body area (empty for future content)
-local body = Instance.new("Frame")
-body.Name = "Body"
-body.Size = UDim2.new(1, 0, 1, -40)
-body.Position = UDim2.new(0, 0, 0, 40)
-body.BackgroundColor3 = Color3.fromRGB(10, 15, 32)
-body.BorderSizePixel = 0
-body.Parent = mainFrame
-
-local bodyCorner = Instance.new("UICorner")
-bodyCorner.CornerRadius = UDim.new(0, 10)
-bodyCorner.Parent = body
-
--- Draggable toggle button with "O"
-local toggleButton = Instance.new("TextButton")
-toggleButton.Name = "ToggleButton"
-toggleButton.Size = UDim2.new(0, 50, 0, 50)
-toggleButton.Position = UDim2.new(1, -60, 1, -60) -- bottom right corner initially
-toggleButton.BackgroundColor3 = Color3.fromRGB(35, 70, 170)
-toggleButton.BackgroundTransparency = 0.1
-toggleButton.Text = "O"
-toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-toggleButton.Font = Enum.Font.SourceSansBold
-toggleButton.TextSize = 24
-toggleButton.AutoButtonColor = false
-toggleButton.BorderSizePixel = 0
-toggleButton.ZIndex = 10
-toggleButton.Parent = mainFrame
-
-local toggleCorner = Instance.new("UICorner")
-toggleCorner.CornerRadius = UDim.new(1, 0) -- fully rounded
-toggleCorner.Parent = toggleButton
-
-local toggleStroke = Instance.new("UIStroke")
-toggleStroke.Color = Color3.fromRGB(100, 140, 255)
-toggleStroke.Thickness = 2
-toggleStroke.Transparency = 0.3
-toggleStroke.Parent = toggleButton
-
--- Add a subtle glow effect
-local toggleGlow = Instance.new("UIStroke")
-toggleGlow.Color = Color3.fromRGB(70, 120, 255)
-toggleGlow.Thickness = 4
-toggleGlow.Transparency = 0.8
-toggleGlow.Parent = toggleButton
-
--- Toggle button draggable logic
-local dragging = false
-local dragOffset = Vector2.new(0, 0)
-
-toggleButton.InputBegan:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 then
-		dragging = true
-		local mousePos = UserInputService:GetMouseLocation()
-		local btnPos = toggleButton.AbsolutePosition
-		dragOffset = Vector2.new(mousePos.X - btnPos.X, mousePos.Y - btnPos.Y)
-		-- Slight scale up feedback
-		tweenSize(toggleButton, UDim2.new(0, 55, 0, 55))
-	end
-end)
-
-UserInputService.InputChanged:Connect(function(input)
-	if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-		local mousePos = UserInputService:GetMouseLocation()
-		local newPos = Vector2.new(mousePos.X - dragOffset.X, mousePos.Y - dragOffset.Y)
-		-- Clamp inside mainFrame
-		local framePos = mainFrame.AbsolutePosition
-		local frameSize = mainFrame.AbsoluteSize
-		local halfSize = toggleButton.AbsoluteSize / 2
-		newPos = Vector2.new(
-			math.clamp(newPos.X, framePos.X + 10, framePos.X + frameSize.X - toggleButton.AbsoluteSize.X - 10),
-			math.clamp(newPos.Y, framePos.Y + 40, framePos.Y + frameSize.Y - toggleButton.AbsoluteSize.Y - 10)
-		)
-		toggleButton.Position = UDim2.new(0, newPos.X - framePos.X, 0, newPos.Y - framePos.Y)
-	end
-end)
-
-UserInputService.InputEnded:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 and dragging then
-		dragging = false
-		tweenSize(toggleButton, UDim2.new(0, 50, 0, 50))
-	end
-end)
-
--- Helper function to tween size
-function tweenSize(instance, targetSize)
-	local tweenInfo = TweenInfo.new(0.15, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
-	local tween = TweenService:Create(instance, tweenInfo, {Size = targetSize})
-	tween:Play()
+    UserInputService.InputChanged:Connect(function(input)
+        if input == dragInput and dragging then
+            local delta = input.Position - dragStart
+            frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        end
+    end)
 end
 
--- Make main window draggable by header
-local headerDragging = false
-local headerDragOffset = Vector2.new(0, 0)
+-- 1. Round Movable Toggle Button
+local ToggleButton = Instance.new("TextButton")
+ToggleButton.Name = "ToggleButton"
+ToggleButton.Size = UDim2.new(0, 50, 0, 50)
+ToggleButton.Position = UDim2.new(0.05, 0, 0.2, 0)
+ToggleButton.BackgroundColor3 = Color3.fromRGB(15, 30, 65)
+ToggleButton.Text = "O"
+ToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+ToggleButton.Font = Enum.Font.GothamBold
+ToggleButton.TextSize = 22
+ToggleButton.Parent = ScreenGui
 
-header.InputBegan:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 then
-		headerDragging = true
-		local mousePos = UserInputService:GetMouseLocation()
-		local framePos = mainFrame.AbsolutePosition
-		headerDragOffset = Vector2.new(mousePos.X - framePos.X, mousePos.Y - framePos.Y)
-	end
-end)
+local ToggleCorner = Instance.new("UICorner")
+ToggleCorner.CornerRadius = UDim.new(1, 0)
+ToggleCorner.Parent = ToggleButton
 
-UserInputService.InputChanged:Connect(function(input)
-	if headerDragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-		local mousePos = UserInputService:GetMouseLocation()
-		local newPos = Vector2.new(mousePos.X - headerDragOffset.X, mousePos.Y - headerDragOffset.Y)
-		-- Keep window within screen bounds
-		local screenSize = workspace.CurrentCamera.ViewportSize
-		newPos = Vector2.new(
-			math.clamp(newPos.X, 0, screenSize.X - mainFrame.AbsoluteSize.X),
-			math.clamp(newPos.Y, 0, screenSize.Y - mainFrame.AbsoluteSize.Y)
-		)
-		mainFrame.Position = UDim2.new(0, newPos.X, 0, newPos.Y)
-	end
-end)
+local ToggleStroke = Instance.new("UIStroke")
+ToggleStroke.Color = Color3.fromRGB(40, 90, 190)
+ToggleStroke.Thickness = 2
+ToggleStroke.Parent = ToggleButton
 
-UserInputService.InputEnded:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 and headerDragging then
-		headerDragging = false
-	end
-end)
+enableDragging(ToggleButton)
 
--- Optional: Add some placeholder buttons inside body (non-functional)
-local buttonContainer = Instance.new("Frame")
-buttonContainer.Name = "ButtonContainer"
-buttonContainer.Size = UDim2.new(1, -20, 0, 40)
-buttonContainer.Position = UDim2.new(0, 10, 0, 10)
-buttonContainer.BackgroundTransparency = 1
-buttonContainer.Parent = body
+-- 2. Main UI Container Frame
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 750, 0, 420)
+MainFrame.Position = UDim2.new(0.5, -375, 0.5, -210)
+MainFrame.BackgroundColor3 = Color3.fromRGB(10, 18, 36)
+MainFrame.Visible = true
+MainFrame.Parent = ScreenGui
 
-local function createPlaceholderButton(text, position)
-	local btn = Instance.new("TextButton")
-	btn.Size = UDim2.new(0, 80, 0, 30)
-	btn.Position = position
-	btn.BackgroundColor3 = Color3.fromRGB(25, 45, 90)
-	btn.Text = text
-	btn.TextColor3 = Color3.fromRGB(200, 210, 255)
-	btn.Font = Enum.Font.SourceSans
-	btn.TextSize = 14
-	btn.AutoButtonColor = false
-	btn.BorderSizePixel = 0
-	local btnCorner = Instance.new("UICorner")
-	btnCorner.CornerRadius = UDim.new(0, 4)
-	btnCorner.Parent = btn
-	btn.Parent = buttonContainer
-	return btn
+local MainCorner = Instance.new("UICorner")
+MainCorner.CornerRadius = UDim.new(0, 14)
+MainCorner.Parent = MainFrame
+
+local MainStroke = Instance.new("UIStroke")
+MainStroke.Color = Color3.fromRGB(30, 60, 120)
+MainStroke.Thickness = 1.5
+MainStroke.Parent = MainFrame
+
+enableDragging(MainFrame)
+
+-- 3. Left Sidebar Panel
+local Sidebar = Instance.new("Frame")
+Sidebar.Name = "Sidebar"
+Sidebar.Size = UDim2.new(0, 210, 1, -20)
+Sidebar.Position = UDim2.new(0, 10, 0, 10)
+Sidebar.BackgroundColor3 = Color3.fromRGB(15, 25, 48)
+Sidebar.Parent = MainFrame
+
+local SidebarCorner = Instance.new("UICorner")
+SidebarCorner.CornerRadius = UDim.new(0, 10)
+SidebarCorner.Parent = Sidebar
+
+-- Header Logo "O" + "Executor"
+local HeaderLogo = Instance.new("TextLabel")
+HeaderLogo.Size = UDim2.new(0, 28, 0, 28)
+HeaderLogo.Position = UDim2.new(0, 12, 0, 12)
+HeaderLogo.BackgroundColor3 = Color3.fromRGB(30, 70, 150)
+HeaderLogo.Text = "O"
+HeaderLogo.TextColor3 = Color3.fromRGB(255, 255, 255)
+HeaderLogo.Font = Enum.Font.GothamBold
+HeaderLogo.TextSize = 16
+HeaderLogo.Parent = Sidebar
+
+local LogoCorner = Instance.new("UICorner")
+LogoCorner.CornerRadius = UDim.new(0, 6)
+LogoCorner.Parent = HeaderLogo
+
+local HeaderTitle = Instance.new("TextLabel")
+HeaderTitle.Size = UDim2.new(0, 120, 0, 28)
+HeaderTitle.Position = UDim2.new(0, 48, 0, 12)
+HeaderTitle.BackgroundTransparency = 1
+HeaderTitle.Text = "Executor"
+HeaderTitle.TextColor3 = Color3.fromRGB(240, 245, 255)
+HeaderTitle.Font = Enum.Font.GothamBold
+HeaderTitle.TextSize = 16
+HeaderTitle.TextXAlignment = Enum.TextXAlignment.Left
+HeaderTitle.Parent = Sidebar
+
+-- Sidebar Sections List
+local function createSidebarSection(titleText, posY, hasSubTab)
+    local SecLabel = Instance.new("TextLabel")
+    SecLabel.Size = UDim2.new(1, -24, 0, 24)
+    SecLabel.Position = UDim2.new(0, 12, 0, posY)
+    SecLabel.BackgroundTransparency = 1
+    SecLabel.Text = titleText
+    SecLabel.TextColor3 = Color3.fromRGB(200, 215, 240)
+    SecLabel.Font = Enum.Font.GothamSemibold
+    SecLabel.TextSize = 13
+    SecLabel.TextXAlignment = Enum.TextXAlignment.Left
+    SecLabel.Parent = Sidebar
+
+    local PlusBtn = Instance.new("TextButton")
+    PlusBtn.Size = UDim2.new(0, 20, 0, 20)
+    PlusBtn.Position = UDim2.new(1, -20, 0, 2)
+    PlusBtn.BackgroundTransparency = 1
+    PlusBtn.Text = "+"
+    PlusBtn.TextColor3 = Color3.fromRGB(150, 170, 200)
+    PlusBtn.Font = Enum.Font.Gotham
+    PlusBtn.TextSize = 16
+    PlusBtn.Parent = SecLabel
+
+    if hasSubTab then
+        local TabBtn = Instance.new("TextButton")
+        TabBtn.Size = UDim2.new(1, 0, 0, 32)
+        TabBtn.Position = UDim2.new(0, 0, 0, 30)
+        TabBtn.BackgroundColor3 = Color3.fromRGB(25, 45, 85)
+        TabBtn.Text = "   New tab"
+        TabBtn.TextColor3 = Color3.fromRGB(220, 230, 255)
+        TabBtn.Font = Enum.Font.Gotham
+        TabBtn.TextSize = 12
+        TabBtn.TextXAlignment = Enum.TextXAlignment.Left
+        TabBtn.Parent = SecLabel
+
+        local TabCorner = Instance.new("UICorner")
+        TabCorner.CornerRadius = UDim.new(0, 6)
+        TabCorner.Parent = TabBtn
+    end
 end
 
-createPlaceholderButton("Execute", UDim2.new(0, 0, 0, 0))
-createPlaceholderButton("Clear", UDim2.new(0, 90, 0, 0))
-createPlaceholderButton("Inject", UDim2.new(0, 180, 0, 0))
+createSidebarSection("Tabs", 55, true)
+createSidebarSection("Saved scripts", 130, false)
+createSidebarSection("Auto-execute", 175, false)
 
--- Simple hover effect for buttons (just for visual feel)
-local function addHover(btn)
-	btn.MouseEnter:Connect(function()
-		btn.BackgroundColor3 = Color3.fromRGB(40, 70, 140)
-	end)
-	btn.MouseLeave:Connect(function()
-		btn.BackgroundColor3 = Color3.fromRGB(25, 45, 90)
-	end)
+-- 4. Code Editor Area
+local EditorFrame = Instance.new("Frame")
+EditorFrame.Name = "EditorFrame"
+EditorFrame.Size = UDim2.new(0, 440, 1, -20)
+EditorFrame.Position = UDim2.new(0, 230, 0, 10)
+EditorFrame.BackgroundColor3 = Color3.fromRGB(6, 12, 24)
+EditorFrame.Parent = MainFrame
+
+local EditorCorner = Instance.new("UICorner")
+EditorCorner.CornerRadius = UDim.new(0, 10)
+EditorCorner.Parent = EditorFrame
+
+local CodeInput = Instance.new("TextBox")
+CodeInput.Name = "CodeInput"
+CodeInput.Size = UDim2.new(1, -20, 1, -60)
+CodeInput.Position = UDim2.new(0, 10, 0, 10)
+CodeInput.BackgroundTransparency = 1
+CodeInput.Text = "-- Join our Discord server to stay updated:\n-- https://discord.gg/example\n-- Paste code here\n\nprint(\"Hello, world!\")"
+CodeInput.TextColor3 = Color3.fromRGB(180, 205, 240)
+CodeInput.Font = Enum.Font.Code
+CodeInput.TextSize = 13
+CodeInput.TextXAlignment = Enum.TextXAlignment.Left
+CodeInput.TextYAlignment = Enum.TextYAlignment.Top
+CodeInput.ClearTextOnFocus = false
+CodeInput.MultiLine = true
+CodeInput.Parent = EditorFrame
+
+-- Floating Bottom Action Bar
+local ActionToolbar = Instance.new("Frame")
+ActionToolbar.Name = "ActionToolbar"
+ActionToolbar.Size = UDim2.new(0, 220, 0, 38)
+ActionToolbar.Position = UDim2.new(0.5, -110, 1, -48)
+ActionToolbar.BackgroundColor3 = Color3.fromRGB(14, 24, 45)
+ActionToolbar.Parent = EditorFrame
+
+local ToolCorner = Instance.new("UICorner")
+ToolCorner.CornerRadius = UDim.new(0, 8)
+ToolCorner.Parent = ActionToolbar
+
+local ToolStroke = Instance.new("UIStroke")
+ToolStroke.Color = Color3.fromRGB(28, 50, 95)
+ToolStroke.Parent = ActionToolbar
+
+-- Action Buttons inside Toolbar
+local function createToolButton(text, pos, callback)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0, 32, 0, 28)
+    btn.Position = UDim2.new(0, pos, 0.5, -14)
+    btn.BackgroundColor3 = Color3.fromRGB(22, 38, 70)
+    btn.Text = text
+    btn.TextColor3 = Color3.fromRGB(200, 220, 255)
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 13
+    btn.Parent = ActionToolbar
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 6)
+    corner.Parent = btn
+
+    btn.MouseButton1Click:Connect(callback)
+    return btn
 end
 
-for _, child in ipairs(buttonContainer:GetChildren()) do
-	if child:IsA("TextButton") then
-		addHover(child)
-	end
+-- Clear Button
+createToolButton("🗑", 8, function()
+    CodeInput.Text = ""
+end)
+
+-- Copy Button
+createToolButton("📋", 46, function()
+    if setclipboard then
+        setclipboard(CodeInput.Text)
+    end
+end)
+
+-- Execute Button
+local ExecuteBtn = Instance.new("TextButton")
+ExecuteBtn.Size = UDim2.new(0, 44, 0, 28)
+ExecuteBtn.Position = UDim2.new(1, -52, 0.5, -14)
+ExecuteBtn.BackgroundColor3 = Color3.fromRGB(30, 80, 180)
+ExecuteBtn.Text = "▶"
+ExecuteBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+ExecuteBtn.Font = Enum.Font.GothamBold
+ExecuteBtn.TextSize = 14
+ExecuteBtn.Parent = ActionToolbar
+
+local ExeCorner = Instance.new("UICorner")
+ExeCorner.CornerRadius = UDim.new(0, 6)
+ExeCorner.Parent = ExecuteBtn
+
+ExecuteBtn.MouseButton1Click:Connect(function()
+    local success, err = pcall(function()
+        local func = loadstring(CodeInput.Text)
+        if func then func() end
+    end)
+    if not success then
+        warn("Execution Error: " .. tostring(err))
+    end
+end)
+
+-- 5. Right Sidebar Controls Bar
+local RightToolbar = Instance.new("Frame")
+RightToolbar.Size = UDim2.new(0, 45, 0, 140)
+RightToolbar.Position = UDim2.new(0, 680, 0, 10)
+RightToolbar.BackgroundColor3 = Color3.fromRGB(15, 25, 48)
+RightToolbar.Parent = MainFrame
+
+local RightCorner = Instance.new("UICorner")
+RightCorner.CornerRadius = UDim.new(0, 10)
+RightCorner.Parent = RightToolbar
+
+local function createIconButton(iconText, posY, isActive)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0, 33, 0, 33)
+    btn.Position = UDim2.new(0.5, -16, 0, posY)
+    btn.BackgroundColor3 = isActive and Color3.fromRGB(35, 85, 190) or Color3.fromRGB(22, 35, 65)
+    btn.Text = iconText
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Font = Enum.Font.Gotham
+    btn.TextSize = 14
+    btn.Parent = RightToolbar
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = btn
 end
 
-print("Executor UI mockup loaded. This is visual only – no script execution.")
+createIconButton("<>", 10, true)
+createIconButton("🔍", 52, false)
+createIconButton("⚙", 94, false)
+
+-- Close Button on UI
+local CloseBtn = Instance.new("TextButton")
+CloseBtn.Size = UDim2.new(0, 45, 0, 45)
+CloseBtn.Position = UDim2.new(0, 680, 1, -55)
+CloseBtn.BackgroundColor3 = Color3.fromRGB(25, 40, 75)
+CloseBtn.Text = "✕"
+CloseBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+CloseBtn.Font = Enum.Font.GothamBold
+CloseBtn.TextSize = 16
+CloseBtn.Parent = MainFrame
+
+local CloseCorner = Instance.new("UICorner")
+CloseCorner.CornerRadius = UDim.new(1, 0)
+CloseCorner.Parent = CloseBtn
+
+-- Toggle Visibility Logic
+local isVisible = true
+local function toggleUI()
+    isVisible = not isVisible
+    MainFrame.Visible = isVisible
+end
+
+ToggleButton.MouseButton1Click:Connect(toggleUI)
+CloseBtn.MouseButton1Click:Connect(toggleUI)
