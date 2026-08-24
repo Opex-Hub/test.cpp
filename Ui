@@ -1,0 +1,259 @@
+--[[
+    Visual Mockup: Executor UI for Roblox Studio
+    - Dark blue theme
+    - Title: "Executor"
+    - Label: "Op"
+    - Draggable toggle button with letter "O"
+    - Non‑functional (no actual script execution)
+]]
+
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- Create ScreenGui
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "ExecutorUI"
+screenGui.ResetOnSpawn = false
+screenGui.IgnoreGuiInset = true
+screenGui.Parent = playerGui
+
+-- Main Frame
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 420, 0, 300)
+mainFrame.Position = UDim2.new(0.5, -210, 0.5, -150)
+mainFrame.BackgroundColor3 = Color3.fromRGB(12, 18, 40) -- deep dark blue
+mainFrame.BorderSizePixel = 0
+mainFrame.Active = true
+mainFrame.Draggable = false -- we'll handle dragging manually for a smoother feel
+mainFrame.Parent = screenGui
+
+-- Rounded corners and subtle border
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 10)
+corner.Parent = mainFrame
+
+local stroke = Instance.new("UIStroke")
+stroke.Color = Color3.fromRGB(40, 60, 120)
+stroke.Thickness = 1.5
+stroke.Transparency = 0.5
+stroke.Parent = mainFrame
+
+-- Header bar (title area)
+local header = Instance.new("Frame")
+header.Name = "Header"
+header.Size = UDim2.new(1, 0, 0, 40)
+header.Position = UDim2.new(0, 0, 0, 0)
+header.BackgroundColor3 = Color3.fromRGB(20, 28, 55)
+header.BorderSizePixel = 0
+header.Parent = mainFrame
+
+local headerCorner = Instance.new("UICorner")
+headerCorner.CornerRadius = UDim.new(0, 10)
+headerCorner.Parent = header
+
+-- Title text
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Name = "Title"
+titleLabel.Size = UDim2.new(0, 200, 1, 0)
+titleLabel.Position = UDim2.new(0, 12, 0, 0)
+titleLabel.BackgroundTransparency = 1
+titleLabel.Text = "Executor"
+titleLabel.TextColor3 = Color3.fromRGB(200, 215, 255)
+titleLabel.Font = Enum.Font.SourceSansBold
+titleLabel.TextSize = 20
+titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+titleLabel.Parent = header
+
+-- "Op" label (subtle badge)
+local opLabel = Instance.new("TextLabel")
+opLabel.Name = "OpLabel"
+opLabel.Size = UDim2.new(0, 50, 0, 22)
+opLabel.Position = UDim2.new(1, -60, 0.5, -11)
+opLabel.BackgroundColor3 = Color3.fromRGB(30, 60, 140)
+opLabel.BackgroundTransparency = 0.2
+opLabel.Text = "Op"
+opLabel.TextColor3 = Color3.fromRGB(180, 200, 255)
+opLabel.Font = Enum.Font.SourceSansBold
+opLabel.TextSize = 14
+opLabel.Parent = header
+
+local opCorner = Instance.new("UICorner")
+opCorner.CornerRadius = UDim.new(0, 6)
+opCorner.Parent = opLabel
+
+-- Body area (empty for future content)
+local body = Instance.new("Frame")
+body.Name = "Body"
+body.Size = UDim2.new(1, 0, 1, -40)
+body.Position = UDim2.new(0, 0, 0, 40)
+body.BackgroundColor3 = Color3.fromRGB(10, 15, 32)
+body.BorderSizePixel = 0
+body.Parent = mainFrame
+
+local bodyCorner = Instance.new("UICorner")
+bodyCorner.CornerRadius = UDim.new(0, 10)
+bodyCorner.Parent = body
+
+-- Draggable toggle button with "O"
+local toggleButton = Instance.new("TextButton")
+toggleButton.Name = "ToggleButton"
+toggleButton.Size = UDim2.new(0, 50, 0, 50)
+toggleButton.Position = UDim2.new(1, -60, 1, -60) -- bottom right corner initially
+toggleButton.BackgroundColor3 = Color3.fromRGB(35, 70, 170)
+toggleButton.BackgroundTransparency = 0.1
+toggleButton.Text = "O"
+toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleButton.Font = Enum.Font.SourceSansBold
+toggleButton.TextSize = 24
+toggleButton.AutoButtonColor = false
+toggleButton.BorderSizePixel = 0
+toggleButton.ZIndex = 10
+toggleButton.Parent = mainFrame
+
+local toggleCorner = Instance.new("UICorner")
+toggleCorner.CornerRadius = UDim.new(1, 0) -- fully rounded
+toggleCorner.Parent = toggleButton
+
+local toggleStroke = Instance.new("UIStroke")
+toggleStroke.Color = Color3.fromRGB(100, 140, 255)
+toggleStroke.Thickness = 2
+toggleStroke.Transparency = 0.3
+toggleStroke.Parent = toggleButton
+
+-- Add a subtle glow effect
+local toggleGlow = Instance.new("UIStroke")
+toggleGlow.Color = Color3.fromRGB(70, 120, 255)
+toggleGlow.Thickness = 4
+toggleGlow.Transparency = 0.8
+toggleGlow.Parent = toggleButton
+
+-- Toggle button draggable logic
+local dragging = false
+local dragOffset = Vector2.new(0, 0)
+
+toggleButton.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		dragging = true
+		local mousePos = UserInputService:GetMouseLocation()
+		local btnPos = toggleButton.AbsolutePosition
+		dragOffset = Vector2.new(mousePos.X - btnPos.X, mousePos.Y - btnPos.Y)
+		-- Slight scale up feedback
+		tweenSize(toggleButton, UDim2.new(0, 55, 0, 55))
+	end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+	if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+		local mousePos = UserInputService:GetMouseLocation()
+		local newPos = Vector2.new(mousePos.X - dragOffset.X, mousePos.Y - dragOffset.Y)
+		-- Clamp inside mainFrame
+		local framePos = mainFrame.AbsolutePosition
+		local frameSize = mainFrame.AbsoluteSize
+		local halfSize = toggleButton.AbsoluteSize / 2
+		newPos = Vector2.new(
+			math.clamp(newPos.X, framePos.X + 10, framePos.X + frameSize.X - toggleButton.AbsoluteSize.X - 10),
+			math.clamp(newPos.Y, framePos.Y + 40, framePos.Y + frameSize.Y - toggleButton.AbsoluteSize.Y - 10)
+		)
+		toggleButton.Position = UDim2.new(0, newPos.X - framePos.X, 0, newPos.Y - framePos.Y)
+	end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 and dragging then
+		dragging = false
+		tweenSize(toggleButton, UDim2.new(0, 50, 0, 50))
+	end
+end)
+
+-- Helper function to tween size
+function tweenSize(instance, targetSize)
+	local tweenInfo = TweenInfo.new(0.15, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
+	local tween = TweenService:Create(instance, tweenInfo, {Size = targetSize})
+	tween:Play()
+end
+
+-- Make main window draggable by header
+local headerDragging = false
+local headerDragOffset = Vector2.new(0, 0)
+
+header.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		headerDragging = true
+		local mousePos = UserInputService:GetMouseLocation()
+		local framePos = mainFrame.AbsolutePosition
+		headerDragOffset = Vector2.new(mousePos.X - framePos.X, mousePos.Y - framePos.Y)
+	end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+	if headerDragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+		local mousePos = UserInputService:GetMouseLocation()
+		local newPos = Vector2.new(mousePos.X - headerDragOffset.X, mousePos.Y - headerDragOffset.Y)
+		-- Keep window within screen bounds
+		local screenSize = workspace.CurrentCamera.ViewportSize
+		newPos = Vector2.new(
+			math.clamp(newPos.X, 0, screenSize.X - mainFrame.AbsoluteSize.X),
+			math.clamp(newPos.Y, 0, screenSize.Y - mainFrame.AbsoluteSize.Y)
+		)
+		mainFrame.Position = UDim2.new(0, newPos.X, 0, newPos.Y)
+	end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 and headerDragging then
+		headerDragging = false
+	end
+end)
+
+-- Optional: Add some placeholder buttons inside body (non-functional)
+local buttonContainer = Instance.new("Frame")
+buttonContainer.Name = "ButtonContainer"
+buttonContainer.Size = UDim2.new(1, -20, 0, 40)
+buttonContainer.Position = UDim2.new(0, 10, 0, 10)
+buttonContainer.BackgroundTransparency = 1
+buttonContainer.Parent = body
+
+local function createPlaceholderButton(text, position)
+	local btn = Instance.new("TextButton")
+	btn.Size = UDim2.new(0, 80, 0, 30)
+	btn.Position = position
+	btn.BackgroundColor3 = Color3.fromRGB(25, 45, 90)
+	btn.Text = text
+	btn.TextColor3 = Color3.fromRGB(200, 210, 255)
+	btn.Font = Enum.Font.SourceSans
+	btn.TextSize = 14
+	btn.AutoButtonColor = false
+	btn.BorderSizePixel = 0
+	local btnCorner = Instance.new("UICorner")
+	btnCorner.CornerRadius = UDim.new(0, 4)
+	btnCorner.Parent = btn
+	btn.Parent = buttonContainer
+	return btn
+end
+
+createPlaceholderButton("Execute", UDim2.new(0, 0, 0, 0))
+createPlaceholderButton("Clear", UDim2.new(0, 90, 0, 0))
+createPlaceholderButton("Inject", UDim2.new(0, 180, 0, 0))
+
+-- Simple hover effect for buttons (just for visual feel)
+local function addHover(btn)
+	btn.MouseEnter:Connect(function()
+		btn.BackgroundColor3 = Color3.fromRGB(40, 70, 140)
+	end)
+	btn.MouseLeave:Connect(function()
+		btn.BackgroundColor3 = Color3.fromRGB(25, 45, 90)
+	end)
+end
+
+for _, child in ipairs(buttonContainer:GetChildren()) do
+	if child:IsA("TextButton") then
+		addHover(child)
+	end
+end
+
+print("Executor UI mockup loaded. This is visual only – no script execution.")
