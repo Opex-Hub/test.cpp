@@ -1,361 +1,268 @@
--- Roblox Dark Blue Executor UI Script (Fixed Buttons & Layout)
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
-local UserInputService = game:GetService("UserInputService")
-
 local LocalPlayer = Players.LocalPlayer
-local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
--- 1. ScreenGui Setup
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "OExecutorGui"
-ScreenGui.ResetOnSpawn = false
-ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-ScreenGui.Parent = PlayerGui
+-- Remote References
+local BuyEggRemote = ReplicatedStorage:WaitForChild("GameEvents"):WaitForChild("BuyPetEgg")
+local BuySeedRemote = ReplicatedStorage:WaitForChild("GameEvents"):WaitForChild("BuySeedStock")
+local CollectCropRemote = ReplicatedStorage:WaitForChild("GameEvents"):WaitForChild("Crops"):WaitForChild("Collect")
+local SellRemote = ReplicatedStorage:WaitForChild("GameEvents"):WaitForChild("Sell_Inventory")
+local BuyGearRemote = ReplicatedStorage:WaitForChild("GameEvents"):WaitForChild("BuyGearStock")
 
--- Helper: Dragging Logic that doesn't break Click Events
-local function makeDraggable(frame, handle, onClick)
-    handle = handle or frame
-    local dragging = false
-    local dragStart, startPos
-    local hasDragged = false
+-- Load Legacy WindUI Safely
+local Success, WindUI = pcall(function()
+    return loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
+end)
 
-    handle.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = true
-            hasDragged = false
-            dragStart = input.Position
-            startPos = frame.Position
+if not Success or not WindUI then
+    warn("Failed to load WindUI library.")
+    return
+end
+
+-- Solid Blue Theme Configuration
+WindUI:AddTheme({
+    Name = "OpexBlue",
+    Accent = Color3.fromRGB(0, 160, 255),
+    Outline = Color3.fromRGB(0, 110, 230),
+    Text = Color3.fromRGB(255, 255, 255),
+    PlaceholderText = Color3.fromRGB(180, 210, 255),
+    Background = Color3.fromRGB(12, 32, 68),
+    Window = Color3.fromRGB(18, 45, 95),
+    Tab = Color3.fromRGB(25, 60, 125),
+    Element = Color3.fromRGB(32, 70, 145)
+})
+
+-- Create Window (Solid Blue, Non-Transparent)
+local Window = WindUI:CreateWindow({
+    Title = "Opex Hub | Grow a Garden",
+    Author = "Tu_papi",
+    Folder = "OpexHubConfig",
+    Size = UDim2.fromOffset(580, 460),
+    Transparent = false,
+    Theme = "OpexBlue"
+})
+
+-- UI Tabs
+local MainTab = Window:Tab({ Title = "Main", Icon = "home" })
+local FarmTab = Window:Tab({ Title = "Auto Farm", Icon = "sprout" })
+local ShopTab = Window:Tab({ Title = "Shop", Icon = "shopping-bag" })
+local SellTab = Window:Tab({ Title = "Sell", Icon = "dollar-sign" })
+
+-- Main Tab Information
+MainTab:Section({ Title = "Opex Hub Information" })
+
+MainTab:Paragraph({
+    Title = "Opex Hub - Version 2.0",
+    Desc = "• Removed garden owner checks for universal crop collection\n• Full Solid Blue non-transparent UI theme\n• Added Seed, Gear, and Egg Auto-Buy Shops"
+})
+
+MainTab:Button({
+    Title = "Copy Discord Invite",
+    Desc = "https://discord.gg/jzquz3QQb",
+    Callback = function()
+        if setclipboard then
+            setclipboard("https://discord.gg/jzquz3QQb")
+        elseif toclipboard then
+            toclipboard("https://discord.gg/jzquz3QQb")
         end
-    end)
+    end
+})
 
-    handle.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = false
-            if not hasDragged and onClick then
-                onClick()
+-- State Variables
+local AutoFarm = false
+local AutoSell = false
+
+local SelectedSeed = "Carrot Seed"
+local AutoBuySeed = false
+
+local SelectedGear = "Watering Can"
+local AutoBuyGear = false
+
+local SelectedEgg = "Common Egg"
+local AutoBuyEgg = false
+
+-- Item Lists
+local SeedsList = {
+    "Carrot Seed", "Strawberry Seed", "Blueberry Seed", "Buttercup Seed",
+    "Tomato Seed", "Corn Seed", "Daffodil Seed", "Watermelon Seed",
+    "Pumpkin Seed", "Apple Seed", "Bamboo Seed", "Coconut Seed",
+    "Cactus Seed", "Dragon Fruit Seed", "Mango Seed", "Grape Seed",
+    "Mushroom Seed", "Pepper Seed", "Cacao Seed", "Sunflower Seed",
+    "Beanstalk Seed", "Ember Lily Seed", "Sugar Apple Seed", "Burning Bud Seed",
+    "Giant Pinecone Seed", "Elder Strawberry Seed", "Romanesco Seed", "Crimson Thorn Seed",
+    "Zebrazinkle Seed", "Octobloom Seed", "Alien Apple Seed", "Moongrain Meadow Seed"
+}
+
+local GearsList = {
+    "Watering Can", "Basic Sprinkler", "Advanced Sprinkler", "Godly Sprinkler",
+    "Master Sprinkler", "Grandmaster Sprinkler", "Trowel", "Recall Wrench",
+    "Medium Toy", "Pet Name Reroller", "Pet Lead", "Medium Treat",
+    "Magnifying Glass", "Cleaning Spray", "Cleansing Pet Shard", "Favorite Tool",
+    "Harvest Tool", "Friendship Pot", "Levelup Lollipop", "Trading Ticket"
+}
+
+local EggsList = {
+    "Common Egg", "Uncommon Egg", "Rare Egg", "Legendary Egg",
+    "Mythical Egg", "Bug Egg", "Jungle Egg"
+}
+
+-- Global Auto Farm Loop (Collects all crops without plot owner restrictions)
+task.spawn(function()
+    while task.wait(0.2) do
+        if AutoFarm then
+            for _, obj in ipairs(workspace:GetDescendants()) do
+                if obj:IsA("Model") then
+                    local parentName = obj.Parent and obj.Parent.Name or ""
+                    if parentName == "Crops" or parentName == "Plants" or parentName == "Plots" or parentName:find("Garden") or parentName:find("Plot") or obj:FindFirstChild("Fruit") or obj:FindFirstChild("Crop") then
+                        CollectCropRemote:FireServer({ obj })
+                    end
+                end
             end
         end
-    end)
+    end
+end)
 
-    UserInputService.InputChanged:Connect(function(input)
-        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-            local delta = input.Position - dragStart
-            if delta.Magnitude > 5 then
-                hasDragged = true
-                frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-            end
+-- Auto Buy Seed Loop
+task.spawn(function()
+    while task.wait(0.5) do
+        if AutoBuySeed and SelectedSeed ~= "" then
+            local cleanSeedName = SelectedSeed:gsub(" Seed", "")
+            BuySeedRemote:FireServer("Shop", cleanSeedName)
         end
-    end)
-end
-
--- 2. Main Frame Container
-local MainFrame = Instance.new("Frame")
-MainFrame.Name = "MainFrame"
-MainFrame.Size = UDim2.new(0, 780, 0, 410)
-MainFrame.Position = UDim2.new(0.5, -390, 0.5, -205)
-MainFrame.BackgroundColor3 = Color3.fromRGB(11, 15, 25)
-MainFrame.BorderSizePixel = 0
-MainFrame.Visible = true
-MainFrame.ZIndex = 5
-MainFrame.Parent = ScreenGui
-
-local MainCorner = Instance.new("UICorner")
-MainCorner.CornerRadius = UDim.new(0, 14)
-MainCorner.Parent = MainFrame
-
-local MainStroke = Instance.new("UIStroke")
-MainStroke.Color = Color3.fromRGB(30, 50, 90)
-MainStroke.Thickness = 1.5
-MainStroke.Parent = MainFrame
-
-makeDraggable(MainFrame)
-
--- 3. Round Movable Toggle Button
-local ToggleButton = Instance.new("TextButton")
-ToggleButton.Name = "ToggleButton"
-ToggleButton.Size = UDim2.new(0, 50, 0, 50)
-ToggleButton.Position = UDim2.new(0.05, 0, 0.15, 0)
-ToggleButton.BackgroundColor3 = Color3.fromRGB(15, 30, 65)
-ToggleButton.Text = "O"
-ToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-ToggleButton.Font = Enum.Font.GothamBold
-ToggleButton.TextSize = 22
-ToggleButton.ZIndex = 100
-ToggleButton.Parent = ScreenGui
-
-local ToggleCorner = Instance.new("UICorner")
-ToggleCorner.CornerRadius = UDim.new(1, 0)
-ToggleCorner.Parent = ToggleButton
-
-local ToggleStroke = Instance.new("UIStroke")
-ToggleStroke.Color = Color3.fromRGB(45, 95, 200)
-ToggleStroke.Thickness = 2
-ToggleStroke.Parent = ToggleButton
-
-makeDraggable(ToggleButton, ToggleButton, function()
-    MainFrame.Visible = not MainFrame.Visible
-end)
-
--- 4. Left Sidebar Panel
-local Sidebar = Instance.new("Frame")
-Sidebar.Size = UDim2.new(0, 210, 1, -20)
-Sidebar.Position = UDim2.new(0, 10, 0, 10)
-Sidebar.BackgroundColor3 = Color3.fromRGB(16, 22, 38)
-Sidebar.BorderSizePixel = 0
-Sidebar.ZIndex = 6
-Sidebar.Parent = MainFrame
-
-local SidebarCorner = Instance.new("UICorner")
-SidebarCorner.CornerRadius = UDim.new(0, 10)
-SidebarCorner.Parent = Sidebar
-
--- Logo + Title
-local HeaderLogo = Instance.new("TextLabel")
-HeaderLogo.Size = UDim2.new(0, 26, 0, 26)
-HeaderLogo.Position = UDim2.new(0, 12, 0, 12)
-HeaderLogo.BackgroundColor3 = Color3.fromRGB(30, 75, 160)
-HeaderLogo.Text = "O"
-HeaderLogo.TextColor3 = Color3.fromRGB(255, 255, 255)
-HeaderLogo.Font = Enum.Font.GothamBold
-HeaderLogo.TextSize = 15
-HeaderLogo.ZIndex = 7
-HeaderLogo.Parent = Sidebar
-
-local LogoCorner = Instance.new("UICorner")
-LogoCorner.CornerRadius = UDim.new(0, 6)
-LogoCorner.Parent = HeaderLogo
-
-local HeaderTitle = Instance.new("TextLabel")
-HeaderTitle.Size = UDim2.new(0, 110, 0, 26)
-HeaderTitle.Position = UDim2.new(0, 46, 0, 12)
-HeaderTitle.BackgroundTransparency = 1
-HeaderTitle.Text = "Executor"
-HeaderTitle.TextColor3 = Color3.fromRGB(240, 245, 255)
-HeaderTitle.Font = Enum.Font.GothamBold
-HeaderTitle.TextSize = 16
-HeaderTitle.TextXAlignment = Enum.TextXAlignment.Left
-HeaderTitle.ZIndex = 7
-HeaderTitle.Parent = Sidebar
-
--- Sidebar Categories
-local function createCategory(name, posY, hasTab)
-    local label = Instance.new("TextLabel")
-    label.Size = UDim2.new(1, -24, 0, 24)
-    label.Position = UDim2.new(0, 12, 0, posY)
-    label.BackgroundTransparency = 1
-    label.Text = name
-    label.TextColor3 = Color3.fromRGB(220, 230, 250)
-    label.Font = Enum.Font.GothamBold
-    label.TextSize = 14
-    label.TextXAlignment = Enum.TextXAlignment.Left
-    label.ZIndex = 7
-    label.Parent = Sidebar
-
-    local addBtn = Instance.new("TextButton")
-    addBtn.Size = UDim2.new(0, 20, 0, 20)
-    addBtn.Position = UDim2.new(1, -20, 0, 2)
-    addBtn.BackgroundTransparency = 1
-    addBtn.Text = "+"
-    addBtn.TextColor3 = Color3.fromRGB(160, 180, 210)
-    addBtn.Font = Enum.Font.GothamBold
-    addBtn.TextSize = 16
-    addBtn.ZIndex = 8
-    addBtn.Parent = label
-
-    if hasTab then
-        local tabBtn = Instance.new("Frame")
-        tabBtn.Size = UDim2.new(1, 0, 0, 34)
-        tabBtn.Position = UDim2.new(0, 0, 0, 30)
-        tabBtn.BackgroundColor3 = Color3.fromRGB(28, 42, 75)
-        tabBtn.ZIndex = 7
-        tabBtn.Parent = label
-
-        local tabCorner = Instance.new("UICorner")
-        tabCorner.CornerRadius = UDim.new(0, 8)
-        tabCorner.Parent = tabBtn
-
-        local tabText = Instance.new("TextLabel")
-        tabText.Size = UDim2.new(1, -30, 1, 0)
-        tabText.Position = UDim2.new(0, 10, 0, 0)
-        tabText.BackgroundTransparency = 1
-        tabText.Text = "👁  New tab"
-        tabText.TextColor3 = Color3.fromRGB(220, 230, 255)
-        tabText.Font = Enum.Font.Gotham
-        tabText.TextSize = 12
-        tabText.TextXAlignment = Enum.TextXAlignment.Left
-        tabText.ZIndex = 8
-        tabText.Parent = tabBtn
-
-        local closeTab = Instance.new("TextButton")
-        closeTab.Size = UDim2.new(0, 20, 0, 20)
-        closeTab.Position = UDim2.new(1, -24, 0.5, -10)
-        closeTab.BackgroundTransparency = 1
-        closeTab.Text = "✕"
-        closeTab.TextColor3 = Color3.fromRGB(140, 160, 190)
-        closeTab.Font = Enum.Font.Gotham
-        closeTab.TextSize = 11
-        closeTab.ZIndex = 8
-        closeTab.Parent = tabBtn
-    end
-end
-
-createCategory("Tabs", 55, true)
-createCategory("Saved scripts", 135, false)
-createCategory("Auto-execute", 180, false)
-
--- 5. Editor Area & Line Numbers
-local EditorFrame = Instance.new("Frame")
-EditorFrame.Size = UDim2.new(0, 480, 1, -20)
-EditorFrame.Position = UDim2.new(0, 230, 0, 10)
-EditorFrame.BackgroundColor3 = Color3.fromRGB(7, 10, 18)
-EditorFrame.BorderSizePixel = 0
-EditorFrame.ZIndex = 6
-EditorFrame.Parent = MainFrame
-
-local EditorCorner = Instance.new("UICorner")
-EditorCorner.CornerRadius = UDim.new(0, 10)
-EditorCorner.Parent = EditorFrame
-
--- Line Numbers Column
-local LineNumbers = Instance.new("TextLabel")
-LineNumbers.Size = UDim2.new(0, 30, 1, -60)
-LineNumbers.Position = UDim2.new(0, 5, 0, 12)
-LineNumbers.BackgroundTransparency = 1
-LineNumbers.Text = "1\n2\n3\n4\n5\n6\n7\n8\n9"
-LineNumbers.TextColor3 = Color3.fromRGB(70, 90, 130)
-LineNumbers.Font = Enum.Font.Code
-LineNumbers.TextSize = 13
-LineNumbers.TextYAlignment = Enum.TextYAlignment.Top
-LineNumbers.ZIndex = 7
-LineNumbers.Parent = EditorFrame
-
--- Code Input Box
-local CodeInput = Instance.new("TextBox")
-CodeInput.Size = UDim2.new(1, -45, 1, -60)
-CodeInput.Position = UDim2.new(0, 38, 0, 12)
-CodeInput.BackgroundTransparency = 1
-CodeInput.Text = "-- Join our Discord server to stay updated:\n-- https://discord.gg/example\n-- Paste code here, or browse the search page.\n\nprint(\"Hello, world!\")"
-CodeInput.TextColor3 = Color3.fromRGB(200, 220, 255)
-CodeInput.Font = Enum.Font.Code
-CodeInput.TextSize = 13
-CodeInput.TextXAlignment = Enum.TextXAlignment.Left
-CodeInput.TextYAlignment = Enum.TextYAlignment.Top
-CodeInput.ClearTextOnFocus = false
-CodeInput.MultiLine = true
-CodeInput.ZIndex = 7
-CodeInput.Parent = EditorFrame
-
--- 6. Floating Action Toolbar (Bottom of Editor)
-local Toolbar = Instance.new("Frame")
-Toolbar.Size = UDim2.new(0, 210, 0, 36)
-Toolbar.Position = UDim2.new(0.5, -105, 1, -46)
-Toolbar.BackgroundColor3 = Color3.fromRGB(15, 22, 38)
-Toolbar.ZIndex = 8
-Toolbar.Parent = EditorFrame
-
-local ToolCorner = Instance.new("UICorner")
-ToolCorner.CornerRadius = UDim.new(0, 8)
-ToolCorner.Parent = Toolbar
-
-local ToolStroke = Instance.new("UIStroke")
-ToolStroke.Color = Color3.fromRGB(30, 50, 90)
-ToolStroke.Parent = Toolbar
-
-local function createToolBtn(icon, posX, color, callback)
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(0, 32, 0, 26)
-    btn.Position = UDim2.new(0, posX, 0.5, -13)
-    btn.BackgroundColor3 = color or Color3.fromRGB(22, 32, 55)
-    btn.Text = icon
-    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    btn.Font = Enum.Font.GothamBold
-    btn.TextSize = 12
-    btn.ZIndex = 9
-    btn.Parent = Toolbar
-
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 6)
-    corner.Parent = btn
-
-    btn.Activated:Connect(callback)
-    return btn
-end
-
--- Clear
-createToolBtn("🗑", 6, nil, function()
-    CodeInput.Text = ""
-end)
-
--- Pencil/Edit
-createToolBtn("✏", 42, nil, function()
-    CodeInput:CaptureFocus()
-end)
-
--- Copy
-createToolBtn("📋", 78, nil, function()
-    if setclipboard then
-        setclipboard(CodeInput.Text)
     end
 end)
 
--- Execute Button
-local ExeBtn = createToolBtn("▶", 166, Color3.fromRGB(35, 85, 190), function()
-    local func = loadstring(CodeInput.Text)
-    if func then
-        task.spawn(func)
+-- Auto Buy Gear Loop
+task.spawn(function()
+    while task.wait(0.5) do
+        if AutoBuyGear and SelectedGear ~= "" then
+            BuyGearRemote:FireServer(SelectedGear)
+        end
     end
 end)
-ExeBtn.Size = UDim2.new(0, 38, 0, 26)
 
--- 7. Right Side Control Dock
-local RightDock = Instance.new("Frame")
-RightDock.Size = UDim2.new(0, 48, 0, 135)
-RightDock.Position = UDim2.new(1, -58, 0, 10)
-RightDock.BackgroundColor3 = Color3.fromRGB(16, 22, 38)
-RightDock.ZIndex = 6
-RightDock.Parent = MainFrame
-
-local DockCorner = Instance.new("UICorner")
-DockCorner.CornerRadius = UDim.new(0, 12)
-DockCorner.Parent = RightDock
-
-local function createDockBtn(icon, posY, isActive)
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(0, 34, 0, 34)
-    btn.Position = UDim2.new(0.5, -17, 0, posY)
-    btn.BackgroundColor3 = isActive and Color3.fromRGB(35, 85, 190) or Color3.fromRGB(22, 30, 50)
-    btn.Text = icon
-    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    btn.Font = Enum.Font.GothamBold
-    btn.TextSize = 13
-    btn.ZIndex = 7
-    btn.Parent = RightDock
-
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 8)
-    corner.Parent = btn
-end
-
-createDockBtn("<>", 8, true)
-createDockBtn("🔍", 50, false)
-createDockBtn("⚙", 92, false)
-
--- Close Button (Bottom Right)
-local CloseBtn = Instance.new("TextButton")
-CloseBtn.Size = UDim2.new(0, 48, 0, 48)
-CloseBtn.Position = UDim2.new(1, -58, 1, -58)
-CloseBtn.BackgroundColor3 = Color3.fromRGB(35, 85, 190)
-CloseBtn.Text = "✕"
-CloseBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-CloseBtn.Font = Enum.Font.GothamBold
-CloseBtn.TextSize = 16
-CloseBtn.ZIndex = 7
-CloseBtn.Parent = MainFrame
-
-local CloseCorner = Instance.new("UICorner")
-CloseCorner.CornerRadius = UDim.new(1, 0)
-CloseCorner.Parent = CloseBtn
-
-CloseBtn.Activated:Connect(function()
-    MainFrame.Visible = false
+-- Auto Buy Egg Loop
+task.spawn(function()
+    while task.wait(0.5) do
+        if AutoBuyEgg and SelectedEgg ~= "" then
+            BuyEggRemote:FireServer(SelectedEgg)
+        end
+    end
 end)
+
+-- Auto Sell Loop
+task.spawn(function()
+    while task.wait(1) do
+        if AutoSell then
+            SellRemote:FireServer()
+        end
+    end
+end)
+
+-- AUTO FARM TAB
+FarmTab:Toggle({
+    Title = "Auto Farm",
+    Desc = "Collects all crops across the workspace",
+    Value = false,
+    Callback = function(Value)
+        AutoFarm = Value
+    end
+})
+
+-- SHOP TAB
+ShopTab:Section({ Title = "Seed Shop" })
+
+ShopTab:Dropdown({
+    Title = "Select Seed",
+    Values = SeedsList,
+    Value = "Carrot Seed",
+    Callback = function(Option)
+        SelectedSeed = Option
+    end
+})
+
+ShopTab:Button({
+    Title = "Buy Selected Seed (Single)",
+    Callback = function()
+        local cleanSeedName = SelectedSeed:gsub(" Seed", "")
+        BuySeedRemote:FireServer("Shop", cleanSeedName)
+    end
+})
+
+ShopTab:Toggle({
+    Title = "Auto Buy Selected Seed",
+    Value = false,
+    Callback = function(Value)
+        AutoBuySeed = Value
+    end
+})
+
+ShopTab:Section({ Title = "Gear Shop" })
+
+ShopTab:Dropdown({
+    Title = "Select Gear",
+    Values = GearsList,
+    Value = "Watering Can",
+    Callback = function(Option)
+        SelectedGear = Option
+    end
+})
+
+ShopTab:Button({
+    Title = "Buy Selected Gear (Single)",
+    Callback = function()
+        BuyGearRemote:FireServer(SelectedGear)
+    end
+})
+
+ShopTab:Toggle({
+    Title = "Auto Buy Selected Gear",
+    Value = false,
+    Callback = function(Value)
+        AutoBuyGear = Value
+    end
+})
+
+ShopTab:Section({ Title = "Pet Egg Shop" })
+
+ShopTab:Dropdown({
+    Title = "Select Egg",
+    Values = EggsList,
+    Value = "Common Egg",
+    Callback = function(Option)
+        SelectedEgg = Option
+    end
+})
+
+ShopTab:Button({
+    Title = "Buy Selected Egg (Single)",
+    Callback = function()
+        BuyEggRemote:FireServer(SelectedEgg)
+    end
+})
+
+ShopTab:Toggle({
+    Title = "Auto Buy Selected Egg",
+    Value = false,
+    Callback = function(Value)
+        AutoBuyEgg = Value
+    end
+})
+
+-- SELL TAB
+SellTab:Button({
+    Title = "Sell Inventory",
+    Desc = "Fires Sell_Inventory remote once",
+    Callback = function()
+        SellRemote:FireServer()
+    end
+})
+
+SellTab:Toggle({
+    Title = "Auto Sell Inventory",
+    Desc = "Continuously sells inventory items",
+    Value = false,
+    Callback = function(Value)
+        AutoSell = Value
+    end
+})
