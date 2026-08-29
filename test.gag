@@ -1,287 +1,93 @@
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Players = game:GetService("Players")
-local LocalPlayer = Players.LocalPlayer
-local StarterGui = game:GetService("StarterGui")
+-- AutoFarm Script for Grow a Garden
+-- This script will automatically farm for the user who runs it
 
--- Remote References
-local BuyEggRemote = ReplicatedStorage:WaitForChild("GameEvents"):WaitForChild("BuyPetEgg")
-local BuySeedRemote = ReplicatedStorage:WaitForChild("GameEvents"):WaitForChild("BuySeedStock")
-local CollectCropRemote = ReplicatedStorage:WaitForChild("GameEvents"):WaitForChild("Crops"):WaitForChild("Collect")
-local SellRemote = ReplicatedStorage:WaitForChild("GameEvents"):WaitForChild("Sell_Inventory")
-local BuyGearRemote = ReplicatedStorage:WaitForChild("GameEvents"):WaitForChild("BuyGearStock")
+-- Configuration
+local farmInterval = 1 -- Time between farming attempts (in seconds)
+local enabled = false   -- Whether the auto farm is active (starts disabled)
 
--- Notification Function
-local function ShowNotification(text)
-    StarterGui:SetCore("SendNotification", {
-        Title = "Opex Hub";
-        Text = text;
-        Duration = 3;
-    })
+-- Create GUI button
+local player = game.Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "AutoFarmGUI"
+screenGui.ResetOnSpawn = false
+
+local button = Instance.new("TextButton")
+button.Name = "ToggleAutoFarm"
+button.Size = UDim2.new(0, 150, 0, 50)
+button.Position = UDim2.new(0, 10, 0, 10)
+button.Text = "AutoFarm: OFF"
+button.BackgroundColor3 = Color3.fromRGB(255, 100, 100)
+button.TextColor3 = Color3.fromRGB(255, 255, 255)
+button.BorderSizePixel = 0
+button.TextSize = 18
+button.Parent = screenGui
+
+-- Get the player's collect remote
+local character = player.Character or player.CharacterAdded:Wait()
+local backpack = player:WaitForChild("Backpack")
+local collectRemote = nil
+
+-- Function to find the collect remote in the backpack or character
+local function findCollectRemote()
+    for _, item in pairs(backpack:GetChildren()) do
+        if item.Name == "Collect Remote" then
+            return item
+        end
+    end
+    
+    -- Check if it's equipped
+    local tool = character:FindFirstChildOfClass("Tool")
+    if tool and tool.Name == "Collect Remote" then
+        return tool
+    end
+    
+    return nil
 end
 
--- Load Legacy WindUI Safely
-local Success, WindUI = pcall(function()
-    return loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
-end)
-
-if not Success or not WindUI then
-    warn("Failed to load WindUI library.")
-    return
+-- Function to perform the farming action
+local function farm()
+    if not enabled then return end
+    
+    collectRemote = findCollectRemote()
+    
+    if collectRemote then
+        -- Activate the collect remote
+        collectRemote:Activate()
+        print("AutoFarm: Collected items")
+    else
+        print("AutoFarm: Collect Remote not found")
+    end
 end
 
--- Enhanced Blue Theme Configuration
-WindUI:AddTheme({
-    Name = "DeepBlue",
-    Accent = Color3.fromRGB(30, 144, 255), -- DodgerBlue
-    Outline = Color3.fromRGB(0, 90, 200),
-    Text = Color3.fromRGB(240, 248, 255), -- AliceBlue
-    PlaceholderText = Color3.fromRGB(173, 216, 230), -- LightBlue
-    Background = Color3.fromRGB(10, 25, 60),
-    Window = Color3.fromRGB(15, 40, 90),
-    Tab = Color3.fromRGB(20, 60, 120),
-    Element = Color3.fromRGB(25, 80, 160)
-})
-
--- Create Window (Enhanced Blue Theme)
-local Window = WindUI:CreateWindow({
-    Title = "Opex Hub | Grow a Garden",
-    Author = "Tu_papi",
-    Folder = "OpexHubConfig",
-    Size = UDim2.fromOffset(580, 460),
-    Transparent = false,
-    Theme = "DeepBlue"
-})
-
--- UI Tabs
-local MainTab = Window:Tab({ Title = "Main", Icon = "home" })
-local FarmTab = Window:Tab({ Title = "Auto Farm", Icon = "sprout" })
-local ShopTab = Window:Tab({ Title = "Shop", Icon = "shopping-bag" })
-local SellTab = Window:Tab({ Title = "Sell", Icon = "dollar-sign" })
-
--- Main Tab Information
-MainTab:Section({ Title = "Opex Hub Information" })
-
-MainTab:Paragraph({
-    Title = "Opex Hub - Version 2.1",
-    Desc = "• Fixed Auto Farm functionality\n• Added purchase notifications\n• Enhanced Deep Blue UI theme\n• Improved performance and stability"
-})
-
-MainTab:Button({
-    Title = "Copy Discord Invite",
-    Desc = "https://discord.gg/jzquz3QQb",
-    Callback = function()
-        if setclipboard then
-            setclipboard("https://discord.gg/jzquz3QQb")
-        elseif toclipboard then
-            toclipboard("https://discord.gg/jzquz3QQb")
-        end
+-- Toggle function for the button
+local function toggleAutoFarm()
+    enabled = not enabled
+    if enabled then
+        button.Text = "AutoFarm: ON"
+        button.BackgroundColor3 = Color3.fromRGB(100, 255, 100)
+        print("AutoFarm enabled")
+    else
+        button.Text = "AutoFarm: OFF"
+        button.BackgroundColor3 = Color3.fromRGB(255, 100, 100)
+        print("AutoFarm disabled")
     end
-})
+end
 
--- State Variables
-local AutoFarm = false
-local AutoSell = false
+-- Connect button click event
+button.MouseButton1Click:Connect(toggleAutoFarm)
 
-local SelectedSeed = "Carrot Seed"
-local AutoBuySeed = false
+-- Add GUI to player's screen
+screenGui.Parent = playerGui
 
-local SelectedGear = "Watering Can"
-local AutoBuyGear = false
+-- Main loop
+print("AutoFarm loaded - Click the button to toggle")
 
-local SelectedEgg = "Common Egg"
-local AutoBuyEgg = false
-
--- Item Lists
-local SeedsList = {
-    "Carrot Seed", "Strawberry Seed", "Blueberry Seed", "Buttercup Seed",
-    "Tomato Seed", "Corn Seed", "Daffodil Seed", "Watermelon Seed",
-    "Pumpkin Seed", "Apple Seed", "Bamboo Seed", "Coconut Seed",
-    "Cactus Seed", "Dragon Fruit Seed", "Mango Seed", "Grape Seed",
-    "Mushroom Seed", "Pepper Seed", "Cacao Seed", "Sunflower Seed",
-    "Beanstalk Seed", "Ember Lily Seed", "Sugar Apple Seed", "Burning Bud Seed",
-    "Giant Pinecone Seed", "Elder Strawberry Seed", "Romanesco Seed", "Crimson Thorn Seed",
-    "Zebrazinkle Seed", "Octobloom Seed", "Alien Apple Seed", "Moongrain Meadow Seed"
-}
-
-local GearsList = {
-    "Watering Can", "Basic Sprinkler", "Advanced Sprinkler", "Godly Sprinkler",
-    "Master Sprinkler", "Grandmaster Sprinkler", "Trowel", "Recall Wrench",
-    "Medium Toy", "Pet Name Reroller", "Pet Lead", "Medium Treat",
-    "Magnifying Glass", "Cleaning Spray", "Cleansing Pet Shard", "Favorite Tool",
-    "Harvest Tool", "Friendship Pot", "Levelup Lollipop", "Trading Ticket"
-}
-
-local EggsList = {
-    "Common Egg", "Uncommon Egg", "Rare Egg", "Legendary Egg",
-    "Mythical Egg", "Bug Egg", "Jungle Egg"
-}
-
--- Global Auto Farm Loop (Fixed)
-task.spawn(function()
-    while task.wait(0.2) do
-        if AutoFarm then
-            for _, obj in ipairs(workspace:GetDescendants()) do
-                if obj:IsA("Model") then
-                    local parentName = obj.Parent and obj.Parent.Name or ""
-                    if parentName == "Crops" or parentName == "Plants" or parentName == "Plots" or parentName:find("Garden") or parentName:find("Plot") or obj:FindFirstChild("Fruit") or obj:FindFirstChild("Crop") then
-                        -- Fixed RemoteEvent firing (table argument removed)
-                        CollectCropRemote:FireServer(obj)
-                    end
-                end
-            end
-        end
+while player.Parent ~= nil do
+    if enabled then
+        pcall(farm)
     end
-end)
+    wait(farmInterval)
+end
 
--- Auto Buy Seed Loop
-task.spawn(function()
-    while task.wait(0.5) do
-        if AutoBuySeed and SelectedSeed ~= "" then
-            local cleanSeedName = SelectedSeed:gsub(" Seed", "")
-            BuySeedRemote:FireServer("Shop", cleanSeedName)
-            ShowNotification("+1 " .. cleanSeedName)
-        end
-    end
-end)
-
--- Auto Buy Gear Loop
-task.spawn(function()
-    while task.wait(0.5) do
-        if AutoBuyGear and SelectedGear ~= "" then
-            BuyGearRemote:FireServer(SelectedGear)
-            ShowNotification("Bought " .. SelectedGear)
-        end
-    end
-end)
-
--- Auto Buy Egg Loop
-task.spawn(function()
-    while task.wait(0.5) do
-        if AutoBuyEgg and SelectedEgg ~= "" then
-            BuyEggRemote:FireServer(SelectedEgg)
-            ShowNotification("Bought " .. SelectedEgg)
-        end
-    end
-end)
-
--- Auto Sell Loop
-task.spawn(function()
-    while task.wait(1) do
-        if AutoSell then
-            SellRemote:FireServer()
-            ShowNotification("Sold inventory items")
-        end
-    end
-end)
-
--- AUTO FARM TAB
-FarmTab:Toggle({
-    Title = "Auto Farm",
-    Desc = "Collects all crops across the workspace",
-    Value = false,
-    Callback = function(Value)
-        AutoFarm = Value
-    end
-})
-
--- SHOP TAB
-ShopTab:Section({ Title = "Seed Shop" })
-
-ShopTab:Dropdown({
-    Title = "Select Seed",
-    Values = SeedsList,
-    Value = "Carrot Seed",
-    Callback = function(Option)
-        SelectedSeed = Option
-    end
-})
-
-ShopTab:Button({
-    Title = "Buy Selected Seed (Single)",
-    Callback = function()
-        local cleanSeedName = SelectedSeed:gsub(" Seed", "")
-        BuySeedRemote:FireServer("Shop", cleanSeedName)
-        ShowNotification("+1 " .. cleanSeedName)
-    end
-})
-
-ShopTab:Toggle({
-    Title = "Auto Buy Selected Seed",
-    Value = false,
-    Callback = function(Value)
-        AutoBuySeed = Value
-    end
-})
-
-ShopTab:Section({ Title = "Gear Shop" })
-
-ShopTab:Dropdown({
-    Title = "Select Gear",
-    Values = GearsList,
-    Value = "Watering Can",
-    Callback = function(Option)
-        SelectedGear = Option
-    end
-})
-
-ShopTab:Button({
-    Title = "Buy Selected Gear (Single)",
-    Callback = function()
-        BuyGearRemote:FireServer(SelectedGear)
-        ShowNotification("Bought " .. SelectedGear)
-    end
-})
-
-ShopTab:Toggle({
-    Title = "Auto Buy Selected Gear",
-    Value = false,
-    Callback = function(Value)
-        AutoBuyGear = Value
-    end
-})
-
-ShopTab:Section({ Title = "Pet Egg Shop" })
-
-ShopTab:Dropdown({
-    Title = "Select Egg",
-    Values = EggsList,
-    Value = "Common Egg",
-    Callback = function(Option)
-        SelectedEgg = Option
-    end
-})
-
-ShopTab:Button({
-    Title = "Buy Selected Egg (Single)",
-    Callback = function()
-        BuyEggRemote:FireServer(SelectedEgg)
-        ShowNotification("Bought " .. SelectedEgg)
-    end
-})
-
-ShopTab:Toggle({
-    Title = "Auto Buy Selected Egg",
-    Value = false,
-    Callback = function(Value)
-        AutoBuyEgg = Value
-    end
-})
-
--- SELL TAB
-SellTab:Button({
-    Title = "Sell Inventory",
-    Desc = "Fires Sell_Inventory remote once",
-    Callback = function()
-        SellRemote:FireServer()
-        ShowNotification("Sold inventory items")
-    end
-})
-
-SellTab:Toggle({
-    Title = "Auto Sell Inventory",
-    Desc = "Continuously sells inventory items",
-    Value = false,
-    Callback = function(Value)
-        AutoSell = Value
-    end
-})
+print("AutoFarm stopped")
