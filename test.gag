@@ -11,6 +11,7 @@ local playerGui = player:WaitForChild("PlayerGui")
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "AutoFarmGUI"
 screenGui.ResetOnSpawn = false
+screenGui.Parent = playerGui
 
 local button = Instance.new("TextButton")
 button.Name = "ToggleAutoFarm"
@@ -23,40 +24,62 @@ button.BorderSizePixel = 0
 button.TextSize = 18
 button.Parent = screenGui
 
--- Get the player's collect remote
-local character = player.Character or player.CharacterAdded:Wait()
-local backpack = player:WaitForChild("Backpack")
-local collectRemote = nil
-
--- Function to find the collect remote in the backpack or character
-local function findCollectRemote()
-    for _, item in pairs(backpack:GetChildren()) do
-        if item.Name == "Collect Remote" then
-            return item
-        end
-    end
-    
-    -- Check if it's equipped
-    local tool = character:FindFirstChildOfClass("Tool")
-    if tool and tool.Name == "Collect Remote" then
-        return tool
-    end
-    
-    return nil
-end
-
--- Function to perform the farming action
+-- Function to find and activate the collect remote
 local function farm()
     if not enabled then return end
     
-    collectRemote = findCollectRemote()
+    local character = player.Character
+    if not character then 
+        warn("No character found")
+        return 
+    end
+    
+    local backpack = player:FindFirstChild("Backpack")
+    if not backpack then 
+        warn("No backpack found")
+        return 
+    end
+    
+    -- Search for Collect Remote in backpack
+    local collectRemote = nil
+    for _, item in pairs(backpack:GetChildren()) do
+        if item:IsA("Tool") and item.Name == "Collect Remote" then
+            collectRemote = item
+            break
+        end
+    end
+    
+    -- If not in backpack, check if equipped
+    if not collectRemote then
+        for _, item in pairs(character:GetChildren()) do
+            if item:IsA("Tool") and item.Name == "Collect Remote" then
+                collectRemote = item
+                break
+            end
+        end
+    end
     
     if collectRemote then
-        -- Activate the collect remote
-        collectRemote:Activate()
-        print("AutoFarm: Collected items")
+        -- Check if the tool has an activate function or remote event
+        if collectRemote:FindFirstChild("RemoteEvent") then
+            collectRemote.RemoteEvent:FireServer()
+            print("AutoFarm: Collected items using RemoteEvent")
+        else
+            -- Try to activate the tool directly
+            collectRemote:Activate()
+            print("AutoFarm: Collected items using Activate")
+        end
     else
         print("AutoFarm: Collect Remote not found")
+        -- Try to get it from ReplicatedStorage or other locations
+        local replicatedStorage = game:GetService("ReplicatedStorage")
+        if replicatedStorage then
+            local remote = replicatedStorage:FindFirstChild("Collect Remote") or 
+                          replicatedStorage:FindFirstChild("CollectRemote")
+            if remote then
+                print("Found remote in ReplicatedStorage but cannot use it directly")
+            end
+        end
     end
 end
 
@@ -78,15 +101,24 @@ end
 button.MouseButton1Click:Connect(toggleAutoFarm)
 
 -- Add GUI to player's screen
-screenGui.Parent = playerGui
+pcall(function()
+    screenGui.Parent = playerGui
+end)
 
 -- Main loop
 print("AutoFarm loaded - Click the button to toggle")
 
-while player.Parent ~= nil do
-    if enabled then
-        pcall(farm)
-    end
+-- Handle character loading
+player.CharacterAdded:Connect(function(character)
+    print("Character loaded")
+end)
+
+while player and player.Parent do
+    pcall(function()
+        if enabled then
+            farm()
+        end
+    end)
     wait(farmInterval)
 end
 
