@@ -1,0 +1,82 @@
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+
+-- Create the ScreenGui container
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "TeleportGUI"
+ScreenGui.ResetOnSpawn = false
+
+-- Safely parent the UI (works for both standard Studio and Executors)
+local success = pcall(function()
+    ScreenGui.Parent = game:GetService("CoreGui")
+end)
+if not success then
+    ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+end
+
+-- Create the small black background frame
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 150, 0, 60)
+MainFrame.Position = UDim2.new(0.5, -75, 0.5, -30)
+MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15) -- Deep black
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Draggable = true -- Allows you to drag the UI around your screen
+MainFrame.Parent = ScreenGui
+
+-- Add rounded corners to the frame
+local UICorner = Instance.new("UICorner")
+UICorner.CornerRadius = UDim.new(0, 8)
+UICorner.Parent = MainFrame
+
+-- Add the blue outline (UIStroke)
+local UIStroke = Instance.new("UIStroke")
+UIStroke.Color = Color3.fromRGB(0, 170, 255) -- Neon blue
+UIStroke.Thickness = 2
+UIStroke.Parent = MainFrame
+
+-- Create the "START" button
+local StartButton = Instance.new("TextButton")
+StartButton.Name = "StartButton"
+StartButton.Size = UDim2.new(1, -20, 1, -20)
+StartButton.Position = UDim2.new(0, 10, 0, 10)
+StartButton.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+StartButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+StartButton.Font = Enum.Font.GothamBold
+StartButton.TextSize = 16
+StartButton.Text = "START"
+StartButton.Parent = MainFrame
+
+-- Add rounded corners to the button
+local ButtonCorner = Instance.new("UICorner")
+ButtonCorner.CornerRadius = UDim.new(0, 6)
+ButtonCorner.Parent = StartButton
+
+-- Store all of the provided coordinates in a table
+local teleportLocations = {
+    CFrame.new(656.418212890625, 70.27617645263672, -361.0721435546875),
+    CFrame.new(790.459228515625, 70.27617645263672, -352.6800842285156),
+    CFrame.new(999.5285034179688, 70.27617645263672, -353.46630859375),
+    CFrame.new(1246.5987548828125, 70.27617645263672, -343.8639831542969)
+}
+
+-- Keep track of which location to teleport to next
+local currentIndex = 1
+
+-- Connect the click event
+StartButton.MouseButton1Click:Connect(function()
+    local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+    local HumanoidRootPart = Character:FindFirstChild("HumanoidRootPart")
+    
+    if HumanoidRootPart then
+        -- Teleport the player to the current index
+        HumanoidRootPart.CFrame = teleportLocations[currentIndex]
+        
+        -- Cycle to the next coordinate for the next click
+        currentIndex = currentIndex + 1
+        if currentIndex > #teleportLocations then
+            currentIndex = 1 -- Loop back to the first location once you reach the end
+        end
+    end
+end)
